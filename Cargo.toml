@@ -9,7 +9,7 @@ repository = "https://github.com/diaryx-org/fig-schema"
 readme = "README.md"
 keywords = ["fig", "schema", "frontmatter", "validation", "vocabulary"]
 categories = ["config", "data-structures", "parser-implementations"]
-publish = false
+publish = true
 
 [dependencies]
 fig = "2.5"
