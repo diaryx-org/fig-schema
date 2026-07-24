@@ -1,0 +1,481 @@
+//! Controlled vocabularies and the generic validation seam.
+//!
+//! This module knows what a vocabulary *term* is and how to check a value
+//! against a list of them ([`validate_enum`]) — that's the whole of what's
+//! genuinely value-shape about a "constraint". It deliberately does not define
+//! a `Constraint` enum: whether a field's constraint is "a controlled
+//! vocabulary" or something else entirely (a reference into a workspace, a
+//! range, a pattern) is the embedder's call, expressed as its own type that
+//! implements [`Validate`]. See [`crate::FieldRule`].
+
+use std::fmt;
+
+use fig::Value;
+
+use crate::present::Tint;
+
+/// One term of a controlled vocabulary.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Term {
+    /// The stored value.
+    pub value: String,
+    /// A human display label (defaults to `value` — see [`Term::display_label`]).
+    pub label: Option<String>,
+    /// A human gloss / help text.
+    pub description: Option<String>,
+    /// Known but no longer offered: still valid where already present, excluded
+    /// from the picker's offered set. Validating one yields [`Validation::Warn`]
+    /// rather than [`Validation::Reject`], even under a closed vocabulary — see
+    /// [`validate_enum`].
+    pub retired: bool,
+    /// A per-value tint (e.g. `public` = positive/green).
+    pub tint: Option<Tint>,
+}
+
+impl Term {
+    /// A bare live term with just a value.
+    pub fn value(v: impl Into<String>) -> Self {
+        Self {
+            value: v.into(),
+            label: None,
+            description: None,
+            retired: false,
+            tint: None,
+        }
+    }
+
+    /// The text to display for this term: [`Term::label`] if set, otherwise the
+    /// stored [`Term::value`].
+    pub fn display_label(&self) -> &str {
+        self.label.as_deref().unwrap_or(&self.value)
+    }
+}
+
+/// Whether a reference or list-shaped field holds one entry or many. Pure data
+/// shape — reused by an embedder's own reference/relation constraint (prov's
+/// `spanning`/`cardinality` concepts, for instance) without this crate needing
+/// to know what a "relation" is.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Cardinality {
+    One,
+    Many,
+}
+
+/// Why a value failed to validate.
+///
+/// Structured rather than pre-rendered, for the same reason [`crate::Presentation`]
+/// carries semantic hints rather than colours: the embedder owns presentation.
+/// A frontend can localize the text, or offer [`Issue::suggestion`] as a
+/// one-tap correction instead of prose. [`Display`](std::fmt::Display) renders
+/// the English default.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Issue {
+    /// What went wrong.
+    pub kind: IssueKind,
+    /// The offending value, as text.
+    pub value: String,
+    /// A near miss from the vocabulary, when one is close enough to be worth
+    /// offering.
+    pub suggestion: Option<String>,
+}
+
+/// The kind of an [`Issue`].
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum IssueKind {
+    /// Not a member of the vocabulary.
+    Unknown,
+    /// A member, but [retired](Term::retired).
+    Retired,
+    /// An embedder-defined issue (a dangling reference, a range violation, …),
+    /// carrying its own rendered message.
+    Custom(String),
+}
+
+impl Issue {
+    /// A value that is not in the vocabulary.
+    pub fn unknown(value: impl Into<String>) -> Self {
+        Self {
+            kind: IssueKind::Unknown,
+            value: value.into(),
+            suggestion: None,
+        }
+    }
+
+    /// A value that is in the vocabulary but [retired](Term::retired).
+    pub fn retired(value: impl Into<String>) -> Self {
+        Self {
+            kind: IssueKind::Retired,
+            value: value.into(),
+            suggestion: None,
+        }
+    }
+
+    /// An embedder-defined issue with its own message.
+    pub fn custom(value: impl Into<String>, message: impl Into<String>) -> Self {
+        Self {
+            kind: IssueKind::Custom(message.into()),
+            value: value.into(),
+            suggestion: None,
+        }
+    }
+
+    /// Attach a near-miss suggestion.
+    pub fn with_suggestion(mut self, suggestion: impl Into<String>) -> Self {
+        self.suggestion = Some(suggestion.into());
+        self
+    }
+}
+
+impl fmt::Display for Issue {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match &self.kind {
+            IssueKind::Custom(message) => f.write_str(message)?,
+            IssueKind::Unknown => write!(f, "“{}” is not a known value", self.value)?,
+            IssueKind::Retired => write!(f, "“{}” is retired and no longer offered", self.value)?,
+        }
+        if let Some(suggestion) = &self.suggestion {
+            write!(f, " — did you mean “{suggestion}”?")?;
+        }
+        Ok(())
+    }
+}
+
+/// The result of validating a value against a field's constraint at commit
+/// time.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum Validation {
+    /// The value is fine — apply it.
+    Ok,
+    /// A soft warning (an open vocabulary's unknown value, or a retired term);
+    /// apply, but surface it.
+    Warn(Issue),
+    /// A hard rejection (a closed vocabulary's unknown value); do not apply.
+    Reject(Issue),
+}
+
+impl Validation {
+    /// Whether the value passed cleanly, with nothing to surface.
+    pub fn is_ok(&self) -> bool {
+        matches!(self, Validation::Ok)
+    }
+
+    /// Whether the value must not be applied.
+    pub fn is_reject(&self) -> bool {
+        matches!(self, Validation::Reject(_))
+    }
+
+    /// The issue behind a warning or rejection, if any.
+    pub fn issue(&self) -> Option<&Issue> {
+        match self {
+            Validation::Ok => None,
+            Validation::Warn(issue) | Validation::Reject(issue) => Some(issue),
+        }
+    }
+
+    /// Severity order, for picking the worst result across a sequence.
+    fn rank(&self) -> u8 {
+        match self {
+            Validation::Ok => 0,
+            Validation::Warn(_) => 1,
+            Validation::Reject(_) => 2,
+        }
+    }
+}
+
+/// A field constraint that knows how to check a candidate value. An embedder
+/// implements this on its own constraint type (an enum with a vocabulary
+/// variant, a reference variant, whatever it needs); [`crate::FieldRule::validate`]
+/// dispatches to it generically.
+///
+/// ```
+/// use fig::Value;
+/// use fig_schema::{Term, Validate, Validation, validate_enum};
+///
+/// // The embedder's own constraint type — this crate never sees its shape.
+/// enum Constraint {
+///     Enum { values: Vec<Term>, closed: bool },
+///     Ref,
+/// }
+///
+/// impl Validate for Constraint {
+///     fn validate(&self, value: &Value) -> Validation {
+///         match self {
+///             Constraint::Enum { values, closed } => validate_enum(values, *closed, value),
+///             Constraint::Ref => Validation::Ok, // resolved against the workspace
+///         }
+///     }
+/// }
+///
+/// let visibility = Constraint::Enum {
+///     values: vec![Term::value("public"), Term::value("private")],
+///     closed: true,
+/// };
+/// assert!(visibility.validate(&Value::Str("public".into())).is_ok());
+/// assert!(visibility.validate(&Value::Str("secret".into())).is_reject());
+/// ```
+pub trait Validate {
+    /// Check `value` against this constraint.
+    fn validate(&self, value: &Value) -> Validation;
+}
+
+/// Validate `value` against a controlled vocabulary — the reusable logic
+/// behind any embedder's vocabulary-shaped constraint.
+///
+/// A sequence is validated element-wise, so a rule declared on a list field
+/// itself governs its items just as one declared with
+/// [`PathPat::each_item_of`](crate::PathPat::each_item_of) does; the most
+/// severe element result wins. Any other shape (a mapping, a number under an
+/// enum field) is left to the caller's own backstop — fig's reparse, typically.
+///
+/// A [retired](Term::retired) term warns rather than rejects: it is still a
+/// *known* value, so a document that already holds one stays committable.
+pub fn validate_enum(values: &[Term], closed: bool, value: &Value) -> Validation {
+    match value {
+        Value::Str(s) => validate_term(values, closed, s),
+        Value::Seq(items) => {
+            let mut worst = Validation::Ok;
+            for item in items {
+                let result = validate_enum(values, closed, item);
+                if result.rank() > worst.rank() {
+                    worst = result;
+                }
+            }
+            worst
+        }
+        _ => Validation::Ok,
+    }
+}
+
+/// Validate one string against the vocabulary.
+fn validate_term(values: &[Term], closed: bool, s: &str) -> Validation {
+    if values.iter().any(|t| !t.retired && t.value == s) {
+        return Validation::Ok;
+    }
+    if values.iter().any(|t| t.retired && t.value == s) {
+        return Validation::Warn(Issue::retired(s));
+    }
+    let mut issue = Issue::unknown(s);
+    if let Some(near) = nearest_term(values, s) {
+        issue = issue.with_suggestion(near);
+    }
+    if closed {
+        Validation::Reject(issue)
+    } else {
+        Validation::Warn(issue)
+    }
+}
+
+/// The live term closest to `value` by a small edit distance, compared
+/// case-insensitively — a lightweight near-miss suggestion. Declaration order
+/// breaks ties.
+fn nearest_term(terms: &[Term], value: &str) -> Option<String> {
+    let lower = value.to_lowercase();
+    let value_len = lower.chars().count();
+    terms
+        .iter()
+        .filter(|t| !t.retired)
+        .filter_map(|t| {
+            let candidate = t.value.to_lowercase();
+            let distance = edit_distance(&candidate, &lower);
+            let budget = suggestion_budget(candidate.chars().count().min(value_len));
+            (distance <= budget).then_some((t, distance))
+        })
+        .min_by_key(|(_, distance)| *distance)
+        // Only the winner is cloned; the vocabulary itself is left untouched.
+        .map(|(t, _)| t.value.clone())
+}
+
+/// How many typos still count as a near miss, for a word of `len` characters.
+/// Scaled to the *shorter* of the two words being compared: at a flat two
+/// typos every two-letter string is a near miss for every other, so a short
+/// vocabulary would otherwise suggest nonsense ("hi" → did you mean "no"?).
+fn suggestion_budget(len: usize) -> usize {
+    match len {
+        0..=2 => 0,
+        3..=4 => 1,
+        _ => 2,
+    }
+}
+
+/// Levenshtein distance — a tiny dependency-free implementation for near-miss
+/// suggestions (the vocabulary sets here are small).
+fn edit_distance(a: &str, b: &str) -> usize {
+    let a: Vec<char> = a.chars().collect();
+    let b: Vec<char> = b.chars().collect();
+    let mut prev: Vec<usize> = (0..=b.len()).collect();
+    let mut cur = vec![0usize; b.len() + 1];
+    for (i, &ca) in a.iter().enumerate() {
+        cur[0] = i + 1;
+        for (j, &cb) in b.iter().enumerate() {
+            let cost = if ca == cb { 0 } else { 1 };
+            cur[j + 1] = (prev[j + 1] + 1).min(cur[j] + 1).min(prev[j] + cost);
+        }
+        std::mem::swap(&mut prev, &mut cur);
+    }
+    prev[b.len()]
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn closed_vocabulary_rejects_unknown_accepts_known() {
+        let terms = vec![Term::value("public"), Term::value("private")];
+        assert_eq!(
+            validate_enum(&terms, true, &Value::Str("public".into())),
+            Validation::Ok
+        );
+        assert!(validate_enum(&terms, true, &Value::Str("familly".into())).is_reject());
+    }
+
+    #[test]
+    fn open_vocabulary_warns_with_a_near_miss() {
+        let terms = vec![Term::value("todo"), Term::value("done")];
+        let Validation::Warn(issue) = validate_enum(&terms, false, &Value::Str("todi".into()))
+        else {
+            panic!("expected a near-miss warning");
+        };
+        assert_eq!(issue.kind, IssueKind::Unknown);
+        assert_eq!(issue.suggestion.as_deref(), Some("todo"));
+    }
+
+    #[test]
+    fn a_closed_rejection_still_carries_a_suggestion() {
+        let terms = vec![Term::value("public"), Term::value("private")];
+        let Validation::Reject(issue) = validate_enum(&terms, true, &Value::Str("privat".into()))
+        else {
+            panic!("expected a rejection");
+        };
+        assert_eq!(issue.suggestion.as_deref(), Some("private"));
+    }
+
+    #[test]
+    fn retired_term_warns_rather_than_rejecting() {
+        // A document already holding a retired value stays committable: the
+        // term is known, merely no longer offered.
+        let terms = vec![
+            Term::value("active"),
+            Term {
+                retired: true,
+                ..Term::value("archived")
+            },
+        ];
+        assert_eq!(
+            validate_enum(&terms, true, &Value::Str("active".into())),
+            Validation::Ok
+        );
+        let result = validate_enum(&terms, true, &Value::Str("archived".into()));
+        assert_eq!(result.issue().map(|i| &i.kind), Some(&IssueKind::Retired));
+        assert!(!result.is_reject());
+    }
+
+    #[test]
+    fn a_retired_term_is_never_suggested() {
+        let terms = vec![Term {
+            retired: true,
+            ..Term::value("archived")
+        }];
+        let result = validate_enum(&terms, false, &Value::Str("archivd".into()));
+        assert_eq!(result.issue().and_then(|i| i.suggestion.as_deref()), None);
+    }
+
+    #[test]
+    fn short_terms_do_not_produce_nonsense_suggestions() {
+        // Two typos apart is the whole of a two-letter word.
+        let terms = vec![Term::value("no")];
+        let result = validate_enum(&terms, false, &Value::Str("hi".into()));
+        assert_eq!(result.issue().and_then(|i| i.suggestion.as_deref()), None);
+
+        let terms = vec![Term::value("a")];
+        let result = validate_enum(&terms, false, &Value::Str("zz".into()));
+        assert_eq!(result.issue().and_then(|i| i.suggestion.as_deref()), None);
+    }
+
+    #[test]
+    fn a_rule_on_the_list_itself_validates_each_item() {
+        let terms = vec![Term::value("public")];
+        let seq = Value::Seq(vec![
+            Value::Str("public".into()),
+            Value::Str("bogus".into()),
+        ]);
+        assert!(validate_enum(&terms, true, &seq).is_reject());
+
+        let all_good = Value::Seq(vec![Value::Str("public".into())]);
+        assert_eq!(validate_enum(&terms, true, &all_good), Validation::Ok);
+    }
+
+    #[test]
+    fn the_most_severe_element_result_wins() {
+        let terms = vec![
+            Term::value("active"),
+            Term {
+                retired: true,
+                ..Term::value("archived")
+            },
+        ];
+        // A retired item alone warns...
+        let warned = Value::Seq(vec![Value::Str("archived".into())]);
+        assert!(matches!(
+            validate_enum(&terms, true, &warned),
+            Validation::Warn(_)
+        ));
+        // ...but an unknown item alongside it rejects the whole sequence.
+        let rejected = Value::Seq(vec![
+            Value::Str("archived".into()),
+            Value::Str("xyz".into()),
+        ]);
+        assert!(validate_enum(&terms, true, &rejected).is_reject());
+    }
+
+    #[test]
+    fn a_non_string_scalar_is_left_to_the_callers_backstop() {
+        let terms = vec![Term::value("public")];
+        assert_eq!(validate_enum(&terms, true, &Value::Int(3)), Validation::Ok);
+    }
+
+    #[test]
+    fn case_folding_is_not_ascii_only() {
+        let terms = vec![Term::value("Öffentlich")];
+        let result = validate_enum(&terms, false, &Value::Str("ÖFFENTLICH".into()));
+        assert_eq!(
+            result.issue().and_then(|i| i.suggestion.as_deref()),
+            Some("Öffentlich")
+        );
+    }
+
+    #[test]
+    fn issue_renders_an_english_default() {
+        assert_eq!(
+            Issue::unknown("xyz").to_string(),
+            "“xyz” is not a known value"
+        );
+        assert_eq!(
+            Issue::unknown("privat")
+                .with_suggestion("private")
+                .to_string(),
+            "“privat” is not a known value — did you mean “private”?"
+        );
+        assert_eq!(
+            Issue::retired("archived").to_string(),
+            "“archived” is retired and no longer offered"
+        );
+        assert_eq!(
+            Issue::custom("../nope", "no such note").to_string(),
+            "no such note"
+        );
+    }
+
+    #[test]
+    fn display_label_falls_back_to_the_stored_value() {
+        assert_eq!(Term::value("public").display_label(), "public");
+        assert_eq!(
+            Term {
+                label: Some("Everyone".into()),
+                ..Term::value("public")
+            }
+            .display_label(),
+            "Everyone"
+        );
+    }
+}
