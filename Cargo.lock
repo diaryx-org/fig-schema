@@ -4,9 +4,9 @@ version = 4
 
 [[package]]
 name = "fig"
-version = "2.5.2"
+version = "3.0.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "214e0cb5d89647f6ee88b2a2b513c3eaae096862e2bbc9fdaa66976b11df6736"
+checksum = "e756302b17b6aea70f98b34d2a3af571a55e3834df92bf41cdc23dfb100d2d7b"
 dependencies = [
  "fig-sys",
 ]
@@ -20,9 +20,9 @@ dependencies = [
 
 [[package]]
 name = "fig-sys"
-version = "2.5.2"
+version = "3.0.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "6fb6436feb301294c1449f907e861212a673c69187ae18faca43b0e30d4b6125"
+checksum = "38ce3369f6da9ed9cfd6e738f9f2fb2a02ad539460ee3691b47c250f14e59bd1"
 dependencies = [
  "fig-sys-linux-arm64-gnu",
  "fig-sys-linux-x64-gnu",
@@ -33,30 +33,30 @@ dependencies = [
 
 [[package]]
 name = "fig-sys-linux-arm64-gnu"
-version = "2.5.2"
+version = "3.0.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "e6020b2d896b9f7dcb876004963a147a8e910b76de8533ddb41bd7074ee50c90"
+checksum = "8ff80d158ad219dd9dc082f423ce422ce87eb5fd33d75cf767ff32c05b7fe978"
 
 [[package]]
 name = "fig-sys-linux-x64-gnu"
-version = "2.5.2"
+version = "3.0.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "6a7c6e28c704c4b2f0e50ab67df3952a01743f4dd11ebfe84309615a0e9fbbd2"
+checksum = "32c07f73c50354110504ae1baeab1780ea4d0ea27c28973463f8f22324b894b7"
 
 [[package]]
 name = "fig-sys-macos-arm64"
-version = "2.5.2"
+version = "3.0.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "c6fa449fb54912b541f53d1c2407bc4f1e28b1b62fca49468044d88fc952eaed"
+checksum = "5a5c6cf48bf9c511c646251ac8acadfb0d7b1f5f1c53ce4aa84b2358eb121572"
 
 [[package]]
 name = "fig-sys-wasm32"
-version = "2.5.2"
+version = "3.0.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "6054d86ed28dd2ea29ca7419dfbfb079d5967b6113e6ffed81c71d306a6afff7"
+checksum = "a19efff64a07746f5fcb316b91d25b0032350760e983cf221f35c0cb7819d228"
 
 [[package]]
 name = "fig-sys-windows-x64-msvc"
-version = "2.5.2"
+version = "3.0.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "741146bb1b247b9a9dd1e35739c7f1e4df169d52ae5919112be78bb39577f752"
+checksum = "dc7a150459cd9c74909911ac95469df7ba26c7d92211d28fc794ed59740d2662"

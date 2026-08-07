@@ -117,6 +117,11 @@ fn extended_text_fits(kind: ExtKind, text: &str) -> bool {
             text,
             "Infinity" | "-Infinity" | "+Infinity" | "NaN" | "-NaN" | "+NaN"
         ),
+        // `ExtKind` is `#[non_exhaustive]`: a fig version newer than this crate
+        // may add a kind we don't recognize yet. This is only a cheap shape
+        // guard (see the doc comment above), so defer to the format's own
+        // reader rather than reject a literal we simply don't have a rule for.
+        _ => true,
     }
 }
 
