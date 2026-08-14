@@ -1,4 +1,5 @@
-//! Controlled vocabularies and the generic validation seam.
+//! Controlled vocabularies, the generic validation seam, and loading a term
+//! set from its document.
 //!
 //! This module knows what a vocabulary *term* is and how to check a value
 //! against a list of them ([`validate_enum`]) — that's the whole of what's
@@ -7,6 +8,13 @@
 //! vocabulary" or something else entirely (a reference into a workspace, a
 //! range, a pattern) is the embedder's call, expressed as its own type that
 //! implements [`Validate`]. See [`crate::FieldRule`].
+//!
+//! It also knows how to load a [`Term`] list from a document ([`parse_vocabulary`]):
+//! the `vocabulary: { field, values }` / `terms:` convention is common enough
+//! across embedders (a frontmatter engine's controlled fields, a batch
+//! renderer's metadata-driven config) that parsing it once here lets them
+//! share the same vocabulary document instead of each hand-rolling the same
+//! parse.
 
 use std::fmt;
 
@@ -59,6 +67,89 @@ impl Term {
 pub enum Cardinality {
     One,
     Many,
+}
+
+/// A controlled vocabulary loaded from its own document: the `field` it
+/// governs, whether its value set is closed, and the terms themselves — ready
+/// to hand to [`validate_enum`].
+#[derive(Debug, Clone, PartialEq)]
+pub struct VocabularyDoc {
+    /// The field this vocabulary governs (`audience`, `tags`).
+    pub field: String,
+    /// Whether the value set is closed (an unknown value is a hard
+    /// [`Validation::Reject`]) or open (a folksonomy — an unknown value only
+    /// [`Validation::Warn`]s, as a possible typo). Any `values` spelling other
+    /// than `"closed"` is open, matching [`validate_enum`]'s own permissive
+    /// default.
+    pub closed: bool,
+    /// The declared terms, in declaration order.
+    pub terms: Vec<Term>,
+}
+
+/// Parse a vocabulary document from its top-level value: a `vocabulary: {
+/// field, values }` marker plus a `terms:` mapping, each entry either a bare
+/// key (a live term with no metadata) or a `{ label?, description?, retired?
+/// }` mapping. Returns `None` when `value` carries no `vocabulary` marker —
+/// i.e. it is not a vocabulary document.
+///
+/// This is the shared file-format half of a controlled vocabulary: [`Term`]
+/// and [`validate_enum`] already say how to *check* a value; this says how to
+/// *load* the term set a document declares, so two independent embedders (a
+/// frontmatter engine, a batch renderer) can point at the same vocabulary
+/// document without either depending on the other.
+pub fn parse_vocabulary(value: &Value) -> Option<VocabularyDoc> {
+    let root = as_map(value)?;
+    let marker = as_map(map_get(root, "vocabulary")?)?;
+    let field = map_get_str(marker, "field")?.to_string();
+    let closed = map_get_str(marker, "values") == Some("closed");
+
+    let mut terms = Vec::new();
+    if let Some(entries) = map_get(root, "terms").and_then(as_map) {
+        for (key, spec) in entries {
+            let Value::Str(name) = key else { continue };
+            terms.push(match as_map(spec) {
+                Some(entry) => Term {
+                    value: name.clone(),
+                    label: map_get_str(entry, "label").map(str::to_string),
+                    description: map_get_str(entry, "description").map(str::to_string),
+                    retired: matches!(map_get(entry, "retired"), Some(Value::Bool(true))),
+                    tint: None,
+                },
+                // A bare `term:` (null/scalar value) is a live term with no metadata.
+                None => Term::value(name.clone()),
+            });
+        }
+    }
+    Some(VocabularyDoc {
+        field,
+        closed,
+        terms,
+    })
+}
+
+/// A mapping's entries, if `value` is [`Value::Map`].
+fn as_map(value: &Value) -> Option<&[(Value, Value)]> {
+    match value {
+        Value::Map(entries) => Some(entries),
+        _ => None,
+    }
+}
+
+/// The value paired with a string key, in a mapping's entries.
+fn map_get<'a>(entries: &'a [(Value, Value)], key: &str) -> Option<&'a Value> {
+    entries
+        .iter()
+        .find(|(k, _)| matches!(k, Value::Str(s) if s == key))
+        .map(|(_, v)| v)
+}
+
+/// The string paired with a key, in a mapping's entries — `None` if absent or
+/// not itself a string.
+fn map_get_str<'a>(entries: &'a [(Value, Value)], key: &str) -> Option<&'a str> {
+    match map_get(entries, key)? {
+        Value::Str(s) => Some(s),
+        _ => None,
+    }
 }
 
 /// Why a value failed to validate.
@@ -477,5 +568,69 @@ mod tests {
             .display_label(),
             "Everyone"
         );
+    }
+
+    fn parse(yaml: &str) -> Option<VocabularyDoc> {
+        let doc = fig::Document::parse(yaml.as_bytes(), fig::Format::Yaml).unwrap();
+        parse_vocabulary(&doc.to_value().unwrap())
+    }
+
+    #[test]
+    fn parses_a_closed_vocabulary_and_validates_against_it() {
+        let v = parse(
+            "vocabulary:\n  field: audience\n  values: closed\n\
+             terms:\n  public:\n    description: Anyone\n  friends: {}\n",
+        )
+        .expect("a vocabulary document");
+        assert_eq!(v.field, "audience");
+        assert!(v.closed);
+        assert_eq!(
+            v.terms
+                .iter()
+                .find(|t| t.value == "public")
+                .and_then(|t| t.description.as_deref()),
+            Some("Anyone")
+        );
+        assert!(validate_enum(&v.terms, v.closed, &Value::Str("public".into())).is_ok());
+        assert!(validate_enum(&v.terms, v.closed, &Value::Str("colleagues".into())).is_reject());
+    }
+
+    #[test]
+    fn an_open_vocabulary_warns_rather_than_rejects() {
+        let v = parse(
+            "vocabulary:\n  field: tags\n  values: open\nterms:\n  todo: {}\n  done: {}\n",
+        )
+        .expect("a vocabulary document");
+        assert!(!v.closed);
+        let result = validate_enum(&v.terms, v.closed, &Value::Str("todi".into()));
+        assert!(matches!(result, Validation::Warn(_)));
+    }
+
+    #[test]
+    fn a_retired_term_is_known_but_not_accepted() {
+        let v = parse(
+            "vocabulary:\n  field: status\n  values: closed\n\
+             terms:\n  active: {}\n  archived_2024:\n    retired: true\n",
+        )
+        .expect("a vocabulary document");
+        assert!(validate_enum(&v.terms, v.closed, &Value::Str("active".into())).is_ok());
+        let result = validate_enum(&v.terms, v.closed, &Value::Str("archived_2024".into()));
+        assert_eq!(result.issue().map(|i| &i.kind), Some(&IssueKind::Retired));
+        assert!(!result.is_reject());
+    }
+
+    #[test]
+    fn a_bare_term_entry_is_a_live_term_with_no_metadata() {
+        let v = parse("vocabulary:\n  field: status\n  values: open\nterms:\n  active:\n")
+            .expect("a vocabulary document");
+        let t = v.terms.iter().find(|t| t.value == "active").unwrap();
+        assert_eq!(t.label, None);
+        assert_eq!(t.description, None);
+        assert!(!t.retired);
+    }
+
+    #[test]
+    fn a_document_without_the_marker_is_not_a_vocabulary() {
+        assert!(parse("title: Notes\n").is_none());
     }
 }

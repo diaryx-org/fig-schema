@@ -25,6 +25,10 @@
 //!   open-vocabulary near-miss warnings). Cardinality (one vs. many) is pure
 //!   data shape, useful even to a constraint this crate doesn't otherwise model
 //!   (a relation/reference field, for instance).
+//! - [`VocabularyDoc`] / [`parse_vocabulary`] — load a term set from the
+//!   shared `vocabulary: { field, values }` / `terms:` document convention, so
+//!   independent embedders can point at the same vocabulary document without
+//!   either depending on the other.
 //! - [`Presentation`] / [`Icon`] / [`Tint`] — renderer-neutral display hints,
 //!   carried on every rule but never interpreted here.
 //! - [`Issue`] / [`IssueKind`] — why a value failed, as data rather than
@@ -80,4 +84,7 @@ mod vocab;
 pub use field::{FieldRule, FieldType, Schema};
 pub use path::{PathPat, Seg, SegPat};
 pub use present::{Icon, Presentation, Tint};
-pub use vocab::{Cardinality, Issue, IssueKind, Term, Validate, Validation, validate_enum};
+pub use vocab::{
+    Cardinality, Issue, IssueKind, Term, Validate, Validation, VocabularyDoc, parse_vocabulary,
+    validate_enum,
+};
