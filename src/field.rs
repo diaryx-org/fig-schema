@@ -7,6 +7,7 @@
 
 use fig::{ExtKind, Value};
 
+use crate::consequence::Consequence;
 use crate::path::{PathPat, Seg};
 use crate::present::Presentation;
 use crate::vocab::{Validate, Validation};
@@ -166,6 +167,12 @@ pub struct FieldRule<C> {
     pub constraint: Option<C>,
     /// Renderer-neutral presentation hints.
     pub present: Presentation,
+    /// What changing this field costs, if anything — see [`Consequence`].
+    ///
+    /// Beside the presentation hints rather than inside them: a cost is a fact
+    /// about the field, not a way of drawing it, and a host that ignores every
+    /// other hint must still honour these.
+    pub on_change: Vec<Consequence>,
 }
 
 impl<C> FieldRule<C> {
@@ -177,6 +184,7 @@ impl<C> FieldRule<C> {
             ty: None,
             constraint: None,
             present: Presentation::default(),
+            on_change: Vec::new(),
         }
     }
 
@@ -209,6 +217,21 @@ impl<C> FieldRule<C> {
     /// Set the presentation hints.
     pub fn present(mut self, present: Presentation) -> Self {
         self.present = present;
+        self
+    }
+
+    /// Declare one more consequence of changing this field. Appends, so a rule
+    /// can carry a blanket cost and a value-specific one by calling this twice
+    /// — see [`FieldRule::consequences_of`].
+    pub fn on_change(mut self, consequence: Consequence) -> Self {
+        self.on_change.push(consequence);
+        self
+    }
+
+    /// Set the whole consequence list at once, for a caller building it from a
+    /// config rather than declaring it inline. Replaces rather than appends.
+    pub fn on_change_all(mut self, consequences: Vec<Consequence>) -> Self {
+        self.on_change = consequences;
         self
     }
 }

@@ -103,3 +103,31 @@ pub enum Tint {
     Warning,
     Danger,
 }
+
+impl Tint {
+    /// Every tint, so a frontend can assert its colour mapping is total —
+    /// `for t in Tint::ALL { assert!(my_colour(*t).is_some()) }` — instead of
+    /// keeping a second copy of this list that silently falls behind.
+    ///
+    /// [`Icon`] deliberately has no equivalent, and the asymmetry is the point
+    /// rather than an oversight. Every other `#[non_exhaustive]` enum here is
+    /// safe against a new variant because *this crate never produces one*: it
+    /// defines the vocabulary, and every value in a workspace is constructed by
+    /// the embedder, so a new variant can only reach a `match` through a
+    /// deliberate, reviewed change to the producer. [`Tint`] is the one where
+    /// that gate is contingent — [`parse_vocabulary`](crate::parse_vocabulary)
+    /// does not read a per-term `tint:` today, but [`Term::tint`](crate::Term)
+    /// exists precisely so a vocabulary can say `public` reads green, and the
+    /// natural place to author that is beside the term in the document. The day
+    /// the parser learns that key, a `Tint` arrives from *user data* and the
+    /// gate becomes "someone edited a file". This list has to already exist for
+    /// that change to turn consumer tests red instead of shipping a term that
+    /// silently renders untinted.
+    pub const ALL: &'static [Tint] = &[
+        Tint::Accent,
+        Tint::Neutral,
+        Tint::Positive,
+        Tint::Warning,
+        Tint::Danger,
+    ];
+}

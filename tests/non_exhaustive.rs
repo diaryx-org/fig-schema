@@ -9,8 +9,9 @@
 
 use fig::Value;
 use fig_schema::{
-    Cardinality, FieldRule, FieldType, Icon, Issue, IssueKind, PathPat, Presentation, Schema, Seg,
-    SegPat, Term, Tint, Validate, Validation, VocabularyDoc, parse_vocabulary, validate_enum,
+    Cardinality, Consequence, FieldRule, FieldType, Icon, Issue, IssueKind, PathPat, Presentation,
+    Schema, Seg, SegPat, Severity, Term, Tint, Validate, Validation, VocabularyDoc,
+    guards_without_terms, parse_vocabulary, validate_enum,
 };
 
 /// An embedder's own constraint type — the seam the crate is built around.
@@ -212,16 +213,22 @@ fn the_non_exhaustive_enums_need_a_wildcard_but_every_variant_is_constructible()
         assert!(!named.is_empty());
     }
 
-    for tint in [
-        Tint::Accent,
-        Tint::Neutral,
-        Tint::Positive,
-        Tint::Warning,
-        Tint::Danger,
-    ] {
-        let loud = matches!(tint, Tint::Warning | Tint::Danger);
-        assert_eq!(loud, matches!(tint, Tint::Warning | Tint::Danger));
+    // `Tint` is the one of these a downstream can check for total coverage,
+    // because it is the one whose values will one day come from a document
+    // rather than from a producer in this workspace. A frontend's colour table
+    // is asserted against `ALL` rather than against a second copy of the list.
+    let colour = |t: Tint| match t {
+        Tint::Accent => Some("accent"),
+        Tint::Neutral => Some("secondary"),
+        Tint::Positive => Some("green"),
+        Tint::Warning => Some("orange"),
+        Tint::Danger => Some("red"),
+        _ => None,
+    };
+    for tint in Tint::ALL {
+        assert!(colour(*tint).is_some(), "no colour for {tint:?}");
     }
+    assert_eq!(Tint::ALL.len(), 5);
 
     for ty in [
         FieldType::Null,
@@ -255,6 +262,16 @@ fn the_closed_scales_are_still_exhaustively_matchable() {
     );
     assert_eq!(outcome(&Validation::Reject(Issue::unknown("x"))), "refuse");
 
+    // Severity is closed for the same reason: a host meeting an unhandled
+    // level through a `_` arm would under-warn about the change it was told to
+    // warn about hardest.
+    let interaction = |s: Severity| match s {
+        Severity::Notice => "inline note",
+        Severity::Confirm => "confirm",
+        Severity::ConfirmExplicitly => "type to confirm",
+    };
+    assert_eq!(interaction(Severity::Confirm), "confirm");
+
     let how_many = |c: Cardinality| match c {
         Cardinality::One => 1,
         Cardinality::Many => usize::MAX,
@@ -276,4 +293,76 @@ fn the_closed_scales_are_still_exhaustively_matchable() {
         Seg::Index(i) => i.to_string(),
     };
     assert_eq!(seg(&Seg::Index(2)), "2");
+}
+
+#[test]
+fn a_consequence_is_declarable_and_readable_from_outside() {
+    let c = Consequence::when("none", "Existing ids cannot be recovered.")
+        .severity(Severity::ConfirmExplicitly);
+    assert_eq!(c.when, Some(Value::Str("none".into())));
+    assert_eq!(c.severity, Severity::ConfirmExplicitly);
+    assert_eq!(c.message, "Existing ids cannot be recovered.");
+
+    let blanket = Consequence::always("Every document is rewritten.");
+    assert_eq!(blanket.when, None);
+    assert_eq!(blanket.severity, Severity::Notice);
+    assert!(blanket.applies_to(&Value::Str("anything".into())));
+}
+
+#[test]
+fn a_rule_carries_its_consequences_and_answers_about_a_destination() {
+    let rule: FieldRule<Vocabulary> = FieldRule::new(PathPat::key("id_storage"))
+        .ty(FieldType::Str)
+        .on_change(Consequence::always("Every document is rewritten."))
+        .on_change(
+            Consequence::when("none", "Existing ids cannot be recovered.")
+                .severity(Severity::ConfirmExplicitly),
+        );
+
+    assert_eq!(rule.on_change.len(), 2);
+    let hit = rule.consequences_of(&Value::Str("none".into()));
+    assert_eq!(hit.len(), 2);
+    assert_eq!(
+        rule.severity_of(&Value::Str("none".into())),
+        Some(Severity::ConfirmExplicitly)
+    );
+    // A destination with no guard of its own still carries the blanket cost.
+    assert_eq!(
+        rule.consequences_of(&Value::Str("registry".into())).len(),
+        1
+    );
+    assert_eq!(
+        rule.severity_of(&Value::Str("registry".into())),
+        Some(Severity::Notice)
+    );
+
+    // Built from a config rather than declared inline.
+    let from_config: FieldRule<Vocabulary> = FieldRule::new(PathPat::key("recycle_bin"))
+        .on_change_all(vec![Consequence::when(
+            false,
+            "Deletion becomes permanent.",
+        )]);
+    assert_eq!(from_config.on_change.len(), 1);
+    assert!(from_config.severity_of(&Value::Bool(true)).is_none());
+}
+
+#[test]
+fn an_embedder_can_lint_its_own_guards_against_its_own_vocabulary() {
+    let doc = VocabularyDoc::new(
+        "id_storage",
+        true,
+        vec![
+            Term::value("off"),
+            Term::value("registry"),
+            Term::value("both"),
+        ],
+    );
+    let declared = [
+        Consequence::always("Every document is rewritten."),
+        Consequence::when("none", "Existing ids cannot be recovered."),
+    ];
+    // The typo'd guard would otherwise never fire, and nothing at commit time
+    // could tell that apart from a value the user simply hasn't chosen.
+    assert_eq!(guards_without_terms(&declared, &doc.terms), vec!["none"]);
+    assert!(guards_without_terms(&declared[..1], &doc.terms).is_empty());
 }

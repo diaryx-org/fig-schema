@@ -31,22 +31,26 @@
 //!   either depending on the other.
 //! - [`Presentation`] / [`Icon`] / [`Tint`] — renderer-neutral display hints,
 //!   carried on every rule but never interpreted here.
+//! - [`Consequence`] / [`Severity`] — what changing a field *costs*, so a host
+//!   can warn before committing an expensive or irreversible edit. A separate
+//!   fact from a [`Tint`], which says only how loudly to draw the field.
+//!
+//! - [`Issue`] / [`IssueKind`] — why a value failed, as data rather than
+//!   prose, so the embedder owns the wording. [`Issue`]'s `Display` renders a
+//!   reasonable English default for embedders that don't care.
 //!
 //! The public structs are `#[non_exhaustive]`, so they are built from a
 //! constructor plus chainable setters ([`FieldRule::new`], [`Term::value`],
 //! [`Presentation::default`]) rather than a struct literal. That is what lets a
 //! later release add a hint without costing every embedder a major version.
-//! - [`Issue`] / [`IssueKind`] — why a value failed, as data rather than
-//!   prose, so the embedder owns the wording. [`Issue`]'s `Display` renders a
-//!   reasonable English default for embedders that don't care.
 //!
 //! # Example
 //!
 //! ```
 //! use fig::Value;
 //! use fig_schema::{
-//!     FieldRule, FieldType, PathPat, Presentation, Schema, Seg, Term, Validate,
-//!     Validation, validate_enum,
+//!     Consequence, FieldRule, FieldType, PathPat, Presentation, Schema, Seg, Severity,
+//!     Term, Validate, Validation, validate_enum,
 //! };
 //!
 //! // The embedder's own constraint type — the seam this crate is built around.
@@ -65,13 +69,24 @@
 //!             values: vec![Term::value("public"), Term::value("family")],
 //!             closed: true,
 //!         })
-//!         .present(Presentation::default().title("Audience")),
+//!         .present(Presentation::default().title("Audience"))
+//!         .on_change(
+//!             Consequence::when("public", "Anyone with the link will be able to read this.")
+//!                 .severity(Severity::Confirm),
+//!         ),
 //! ]);
 //!
 //! // Find the rule governing `audience[0]`, then check a candidate against it.
 //! let path = [Seg::Key("audience".into()), Seg::Index(0)];
 //! let rule = schema.rule_for(&path).expect("a rule governs this path");
 //! assert!(rule.validate(&Value::Str("public".into())).is_ok());
+//!
+//! // Valid, but not free — ask before committing it.
+//! assert_eq!(
+//!     rule.severity_of(&Value::Str("public".into())),
+//!     Some(Severity::Confirm),
+//! );
+//! assert_eq!(rule.severity_of(&Value::Str("family".into())), None);
 //!
 //! let rejected = rule.validate(&Value::Str("familly".into()));
 //! assert!(rejected.is_reject());
@@ -81,11 +96,13 @@
 //! );
 //! ```
 
+mod consequence;
 mod field;
 mod path;
 mod present;
 mod vocab;
 
+pub use consequence::{Consequence, Severity, guards_without_terms};
 pub use field::{FieldRule, FieldType, Schema};
 pub use path::{PathPat, Seg, SegPat};
 pub use present::{Icon, Presentation, Tint};
