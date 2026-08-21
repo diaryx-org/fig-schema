@@ -97,26 +97,34 @@ pub struct VocabularyDoc {
 /// *load* the term set a document declares, so two independent embedders (a
 /// frontmatter engine, a batch renderer) can point at the same vocabulary
 /// document without either depending on the other.
+///
+/// Key lookup is [`Value::get`], so a duplicated key resolves last-wins, the
+/// same way fig itself reads one. A duplicated *term* is not a lookup and
+/// yields two [`Term`]s with the same value, in declaration order.
 pub fn parse_vocabulary(value: &Value) -> Option<VocabularyDoc> {
-    let root = as_map(value)?;
-    let marker = as_map(map_get(root, "vocabulary")?)?;
-    let field = map_get_str(marker, "field")?.to_string();
-    let closed = map_get_str(marker, "values") == Some("closed");
+    let marker = value.get("vocabulary")?;
+    let field = marker.get("field")?.as_str()?.to_string();
+    let closed = marker.get("values").and_then(Value::as_str) == Some("closed");
 
     let mut terms = Vec::new();
-    if let Some(entries) = map_get(root, "terms").and_then(as_map) {
+    if let Some(entries) = value.get("terms").and_then(Value::as_mapping) {
         for (key, spec) in entries {
-            let Value::Str(name) = key else { continue };
-            terms.push(match as_map(spec) {
-                Some(entry) => Term {
-                    value: name.clone(),
-                    label: map_get_str(entry, "label").map(str::to_string),
-                    description: map_get_str(entry, "description").map(str::to_string),
-                    retired: matches!(map_get(entry, "retired"), Some(Value::Bool(true))),
-                    tint: None,
-                },
-                // A bare `term:` (null/scalar value) is a live term with no metadata.
-                None => Term::value(name.clone()),
+            let Some(name) = key.as_str() else { continue };
+            // A bare `term:` (null/scalar spec) has no keys to read, so every
+            // lookup below misses and it comes out a live term with no
+            // metadata — the same shape `Term::value` builds.
+            terms.push(Term {
+                value: name.to_string(),
+                label: spec
+                    .get("label")
+                    .and_then(Value::as_str)
+                    .map(str::to_string),
+                description: spec
+                    .get("description")
+                    .and_then(Value::as_str)
+                    .map(str::to_string),
+                retired: spec.get("retired").and_then(Value::as_bool) == Some(true),
+                tint: None,
             });
         }
     }
@@ -125,31 +133,6 @@ pub fn parse_vocabulary(value: &Value) -> Option<VocabularyDoc> {
         closed,
         terms,
     })
-}
-
-/// A mapping's entries, if `value` is [`Value::Map`].
-fn as_map(value: &Value) -> Option<&[(Value, Value)]> {
-    match value {
-        Value::Map(entries) => Some(entries),
-        _ => None,
-    }
-}
-
-/// The value paired with a string key, in a mapping's entries.
-fn map_get<'a>(entries: &'a [(Value, Value)], key: &str) -> Option<&'a Value> {
-    entries
-        .iter()
-        .find(|(k, _)| matches!(k, Value::Str(s) if s == key))
-        .map(|(_, v)| v)
-}
-
-/// The string paired with a key, in a mapping's entries — `None` if absent or
-/// not itself a string.
-fn map_get_str<'a>(entries: &'a [(Value, Value)], key: &str) -> Option<&'a str> {
-    match map_get(entries, key)? {
-        Value::Str(s) => Some(s),
-        _ => None,
-    }
 }
 
 /// Why a value failed to validate.
@@ -597,10 +580,9 @@ mod tests {
 
     #[test]
     fn an_open_vocabulary_warns_rather_than_rejects() {
-        let v = parse(
-            "vocabulary:\n  field: tags\n  values: open\nterms:\n  todo: {}\n  done: {}\n",
-        )
-        .expect("a vocabulary document");
+        let v =
+            parse("vocabulary:\n  field: tags\n  values: open\nterms:\n  todo: {}\n  done: {}\n")
+                .expect("a vocabulary document");
         assert!(!v.closed);
         let result = validate_enum(&v.terms, v.closed, &Value::Str("todi".into()));
         assert!(matches!(result, Validation::Warn(_)));
@@ -627,6 +609,27 @@ mod tests {
         assert_eq!(t.label, None);
         assert_eq!(t.description, None);
         assert!(!t.retired);
+    }
+
+    #[test]
+    fn a_duplicated_key_resolves_last_wins_the_way_fig_reads_it() {
+        // fig's own `Value::get` is last-wins on duplicates. This crate used to
+        // hand-roll a first-wins lookup, so it disagreed with fig about what
+        // the same bytes said.
+        let v = parse(
+            "vocabulary:\n  field: audience\n  field: tags\n  values: closed\nterms:\n  a:\n",
+        )
+        .expect("a vocabulary document");
+        assert_eq!(v.field, "tags");
+    }
+
+    #[test]
+    fn a_duplicated_term_is_not_a_lookup_and_stays_twice() {
+        // Terms are iterated, not looked up, so both survive in declaration
+        // order — a picker would offer the value twice.
+        let v = parse("vocabulary:\n  field: status\n  values: open\nterms:\n  a:\n  a:\n")
+            .expect("a vocabulary document");
+        assert_eq!(v.terms.iter().filter(|t| t.value == "a").count(), 2);
     }
 
     #[test]
