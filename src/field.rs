@@ -12,7 +12,12 @@ use crate::present::Presentation;
 use crate::vocab::{Validate, Validation};
 
 /// The type a field expects. Drives type-directed parsing and widget choice.
+///
+/// `#[non_exhaustive]`: fig gains [`ExtKind`]s and a schema gains field shapes
+/// in ordinary releases, so a `match` needs a `_` arm. Constructing a variant
+/// is unaffected.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[non_exhaustive]
 pub enum FieldType {
     Null,
     Bool,
@@ -134,7 +139,24 @@ fn extended_text_fits(kind: ExtKind, text: &str) -> bool {
 
 /// One field rule: which node(s) it governs, the type it expects, an optional
 /// constraint of the embedder's own type `C`, and how to present it.
+///
+/// `#[non_exhaustive]`: a rule gains ways to describe a field over time, so it
+/// is built from [`FieldRule::new`] and the chainable setters rather than a
+/// struct literal. Reading the fields is unchanged.
+///
+/// ```
+/// use fig_schema::{FieldRule, FieldType, PathPat, Presentation, Validate, Validation};
+/// # use fig::Value;
+/// # struct Vocab;
+/// # impl Validate for Vocab { fn validate(&self, _: &Value) -> Validation { Validation::Ok } }
+/// let rule = FieldRule::new(PathPat::each_item_of("audience"))
+///     .ty(FieldType::Str)
+///     .constraint(Vocab)
+///     .present(Presentation::default().title("Audience"));
+/// assert_eq!(rule.ty, Some(FieldType::Str));
+/// ```
 #[derive(Debug, Clone)]
+#[non_exhaustive]
 pub struct FieldRule<C> {
     /// Which node(s) this governs (reaches list *elements*, not only scalars).
     pub at: PathPat,
@@ -144,6 +166,51 @@ pub struct FieldRule<C> {
     pub constraint: Option<C>,
     /// Renderer-neutral presentation hints.
     pub present: Presentation,
+}
+
+impl<C> FieldRule<C> {
+    /// A rule governing `at`, with no type, no constraint and no presentation
+    /// hints — the parts a caller adds with the setters below.
+    pub fn new(at: PathPat) -> Self {
+        Self {
+            at,
+            ty: None,
+            constraint: None,
+            present: Presentation::default(),
+        }
+    }
+
+    /// Set the expected type. Takes a [`FieldType`] or an `Option<FieldType>`,
+    /// so a caller reading a config that may not declare one can pass it
+    /// straight through.
+    pub fn ty(mut self, ty: impl Into<Option<FieldType>>) -> Self {
+        self.ty = ty.into();
+        self
+    }
+
+    /// Set the value constraint.
+    ///
+    /// This one takes a `C` rather than an `impl Into<Option<C>>` the way
+    /// [`FieldRule::ty`] does: with `C` otherwise unconstrained, `Into` cannot
+    /// tell `C` from `Option<C>` and the call fails to infer. Use
+    /// [`FieldRule::constraint_opt`] for a constraint that may be absent.
+    pub fn constraint(mut self, constraint: C) -> Self {
+        self.constraint = Some(constraint);
+        self
+    }
+
+    /// Set the value constraint from an optional one. `None` leaves the rule
+    /// imposing nothing, which is what a type-only rule wants.
+    pub fn constraint_opt(mut self, constraint: Option<C>) -> Self {
+        self.constraint = constraint;
+        self
+    }
+
+    /// Set the presentation hints.
+    pub fn present(mut self, present: Presentation) -> Self {
+        self.present = present;
+        self
+    }
 }
 
 impl<C: Validate> FieldRule<C> {
@@ -305,23 +372,15 @@ mod tests {
 
     #[test]
     fn rule_validate_dispatches_to_the_embedder_constraint() {
-        let rule = FieldRule {
-            at: PathPat::key("status"),
-            ty: Some(FieldType::Str),
-            constraint: Some(AlwaysReject),
-            present: Presentation::default(),
-        };
+        let rule = FieldRule::new(PathPat::key("status"))
+            .ty(FieldType::Str)
+            .constraint(AlwaysReject);
         assert!(rule.validate(&Value::Str("anything".into())).is_reject());
     }
 
     #[test]
     fn rule_with_no_constraint_always_validates_ok() {
-        let rule: FieldRule<AlwaysReject> = FieldRule {
-            at: PathPat::key("status"),
-            ty: None,
-            constraint: None,
-            present: Presentation::default(),
-        };
+        let rule: FieldRule<AlwaysReject> = FieldRule::new(PathPat::key("status"));
         assert_eq!(
             rule.validate(&Value::Str("anything".into())),
             Validation::Ok
@@ -331,18 +390,10 @@ mod tests {
     #[test]
     fn schema_rule_for_finds_first_match_in_declaration_order() {
         let schema = Schema::new(vec![
-            FieldRule {
-                at: PathPat::each_item_of("tags"),
-                ty: Some(FieldType::Str),
-                constraint: None::<AlwaysReject>,
-                present: Presentation::default(),
-            },
-            FieldRule {
-                at: PathPat::key("title"),
-                ty: Some(FieldType::Str),
-                constraint: None,
-                present: Presentation::default(),
-            },
+            FieldRule::new(PathPat::each_item_of("tags"))
+                .ty(FieldType::Str)
+                .constraint_opt(None::<AlwaysReject>),
+            FieldRule::new(PathPat::key("title")).ty(FieldType::Str),
         ]);
         assert!(schema.rule_for(&[Seg::Key("title".into())]).is_some());
         assert!(
@@ -356,21 +407,13 @@ mod tests {
     #[test]
     fn a_specific_rule_takes_precedence_over_a_subtree_rule() {
         let schema = Schema::new(vec![
-            FieldRule {
-                at: PathPat(vec![
-                    crate::SegPat::Key("meta".into()),
-                    crate::SegPat::Key("id".into()),
-                ]),
-                ty: Some(FieldType::Int),
-                constraint: None::<AlwaysReject>,
-                present: Presentation::default(),
-            },
-            FieldRule {
-                at: PathPat::subtree_of("meta"),
-                ty: Some(FieldType::Str),
-                constraint: None,
-                present: Presentation::default(),
-            },
+            FieldRule::new(PathPat(vec![
+                crate::SegPat::Key("meta".into()),
+                crate::SegPat::Key("id".into()),
+            ]))
+            .ty(FieldType::Int)
+            .constraint_opt(None::<AlwaysReject>),
+            FieldRule::new(PathPat::subtree_of("meta")).ty(FieldType::Str),
         ]);
         let id = [Seg::Key("meta".into()), Seg::Key("id".into())];
         assert_eq!(schema.rule_for(&id).unwrap().ty, Some(FieldType::Int));

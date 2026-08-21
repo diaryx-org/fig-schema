@@ -42,15 +42,15 @@ impl Validate for Vocabulary {
     }
 }
 
-let schema = Schema::new(vec![FieldRule {
-    at: PathPat::each_item_of("audience"),
-    ty: Some(FieldType::Str),
-    constraint: Some(Vocabulary {
-        values: vec![Term::value("public"), Term::value("family")],
-        closed: true,
-    }),
-    present: Presentation::default(),
-}]);
+let schema = Schema::new(vec![
+    FieldRule::new(PathPat::each_item_of("audience"))
+        .ty(FieldType::Str)
+        .constraint(Vocabulary {
+            values: vec![Term::value("public"), Term::value("family")],
+            closed: true,
+        })
+        .present(Presentation::default().title("Audience")),
+]);
 
 let path = [Seg::Key("audience".into()), Seg::Index(0)];
 let rule = schema.rule_for(&path).expect("a rule governs this path");

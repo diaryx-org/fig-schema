@@ -31,6 +31,11 @@
 //!   either depending on the other.
 //! - [`Presentation`] / [`Icon`] / [`Tint`] — renderer-neutral display hints,
 //!   carried on every rule but never interpreted here.
+//!
+//! The public structs are `#[non_exhaustive]`, so they are built from a
+//! constructor plus chainable setters ([`FieldRule::new`], [`Term::value`],
+//! [`Presentation::default`]) rather than a struct literal. That is what lets a
+//! later release add a hint without costing every embedder a major version.
 //! - [`Issue`] / [`IssueKind`] — why a value failed, as data rather than
 //!   prose, so the embedder owns the wording. [`Issue`]'s `Display` renders a
 //!   reasonable English default for embedders that don't care.
@@ -53,15 +58,15 @@
 //!     }
 //! }
 //!
-//! let schema = Schema::new(vec![FieldRule {
-//!     at: PathPat::each_item_of("audience"),
-//!     ty: Some(FieldType::Str),
-//!     constraint: Some(Vocabulary {
-//!         values: vec![Term::value("public"), Term::value("family")],
-//!         closed: true,
-//!     }),
-//!     present: Presentation::default(),
-//! }]);
+//! let schema = Schema::new(vec![
+//!     FieldRule::new(PathPat::each_item_of("audience"))
+//!         .ty(FieldType::Str)
+//!         .constraint(Vocabulary {
+//!             values: vec![Term::value("public"), Term::value("family")],
+//!             closed: true,
+//!         })
+//!         .present(Presentation::default().title("Audience")),
+//! ]);
 //!
 //! // Find the rule governing `audience[0]`, then check a candidate against it.
 //! let path = [Seg::Key("audience".into()), Seg::Index(0)];

@@ -23,7 +23,20 @@ use fig::Value;
 use crate::present::Tint;
 
 /// One term of a controlled vocabulary.
+///
+/// `#[non_exhaustive]`: a term gains display and lifecycle facets over time, so
+/// it is built from [`Term::value`] and the chainable setters rather than a
+/// struct literal. Reading the fields is unchanged.
+///
+/// ```
+/// use fig_schema::Term;
+///
+/// let t = Term::value("archived").label("Archived").retired(true);
+/// assert_eq!(t.display_label(), "Archived");
+/// assert!(t.retired);
+/// ```
 #[derive(Debug, Clone, PartialEq, Eq)]
+#[non_exhaustive]
 pub struct Term {
     /// The stored value.
     pub value: String,
@@ -52,6 +65,42 @@ impl Term {
         }
     }
 
+    /// Set the display label.
+    pub fn label(mut self, label: impl Into<String>) -> Self {
+        self.label = Some(label.into());
+        self
+    }
+
+    /// Set the display label from an optional one. `None` leaves it unset.
+    pub fn label_opt(mut self, label: Option<impl Into<String>>) -> Self {
+        self.label = label.map(Into::into);
+        self
+    }
+
+    /// Set the human gloss.
+    pub fn description(mut self, description: impl Into<String>) -> Self {
+        self.description = Some(description.into());
+        self
+    }
+
+    /// Set the human gloss from an optional one. `None` leaves it unset.
+    pub fn description_opt(mut self, description: Option<impl Into<String>>) -> Self {
+        self.description = description.map(Into::into);
+        self
+    }
+
+    /// Mark the term [retired](Term::retired) — known, but no longer offered.
+    pub fn retired(mut self, retired: bool) -> Self {
+        self.retired = retired;
+        self
+    }
+
+    /// Set the per-value tint. Takes a [`Tint`] or an `Option<Tint>`.
+    pub fn tint(mut self, tint: impl Into<Option<Tint>>) -> Self {
+        self.tint = tint.into();
+        self
+    }
+
     /// The text to display for this term: [`Term::label`] if set, otherwise the
     /// stored [`Term::value`].
     pub fn display_label(&self) -> &str {
@@ -72,7 +121,11 @@ pub enum Cardinality {
 /// A controlled vocabulary loaded from its own document: the `field` it
 /// governs, whether its value set is closed, and the terms themselves — ready
 /// to hand to [`validate_enum`].
+///
+/// `#[non_exhaustive]`: the document convention can gain declared facts, so
+/// build one with [`VocabularyDoc::new`]. Reading the fields is unchanged.
 #[derive(Debug, Clone, PartialEq)]
+#[non_exhaustive]
 pub struct VocabularyDoc {
     /// The field this vocabulary governs (`audience`, `tags`).
     pub field: String,
@@ -84,6 +137,17 @@ pub struct VocabularyDoc {
     pub closed: bool,
     /// The declared terms, in declaration order.
     pub terms: Vec<Term>,
+}
+
+impl VocabularyDoc {
+    /// A vocabulary declared in code rather than loaded from a document.
+    pub fn new(field: impl Into<String>, closed: bool, terms: Vec<Term>) -> Self {
+        Self {
+            field: field.into(),
+            closed,
+            terms,
+        }
+    }
 }
 
 /// Parse a vocabulary document from its top-level value: a `vocabulary: {
@@ -142,7 +206,12 @@ pub fn parse_vocabulary(value: &Value) -> Option<VocabularyDoc> {
 /// A frontend can localize the text, or offer [`Issue::suggestion`] as a
 /// one-tap correction instead of prose. [`Display`](std::fmt::Display) renders
 /// the English default.
+///
+/// `#[non_exhaustive]`: an issue can gain context (a span, a source) without
+/// costing downstream a major. Build one with [`Issue::unknown`],
+/// [`Issue::retired`] or [`Issue::custom`]; reading the fields is unchanged.
 #[derive(Debug, Clone, PartialEq, Eq)]
+#[non_exhaustive]
 pub struct Issue {
     /// What went wrong.
     pub kind: IssueKind,
@@ -154,7 +223,12 @@ pub struct Issue {
 }
 
 /// The kind of an [`Issue`].
+///
+/// `#[non_exhaustive]`: new failure kinds get their own variant as the crate
+/// grows, so a `match` needs a `_` arm. [`IssueKind::Custom`] already carries
+/// anything an embedder defines.
 #[derive(Debug, Clone, PartialEq, Eq)]
+#[non_exhaustive]
 pub enum IssueKind {
     /// Not a member of the vocabulary.
     Unknown,
@@ -428,13 +502,7 @@ mod tests {
     fn retired_term_warns_rather_than_rejecting() {
         // A document already holding a retired value stays committable: the
         // term is known, merely no longer offered.
-        let terms = vec![
-            Term::value("active"),
-            Term {
-                retired: true,
-                ..Term::value("archived")
-            },
-        ];
+        let terms = vec![Term::value("active"), Term::value("archived").retired(true)];
         assert_eq!(
             validate_enum(&terms, true, &Value::Str("active".into())),
             Validation::Ok
@@ -446,10 +514,7 @@ mod tests {
 
     #[test]
     fn a_retired_term_is_never_suggested() {
-        let terms = vec![Term {
-            retired: true,
-            ..Term::value("archived")
-        }];
+        let terms = vec![Term::value("archived").retired(true)];
         let result = validate_enum(&terms, false, &Value::Str("archivd".into()));
         assert_eq!(result.issue().and_then(|i| i.suggestion.as_deref()), None);
     }
@@ -481,13 +546,7 @@ mod tests {
 
     #[test]
     fn the_most_severe_element_result_wins() {
-        let terms = vec![
-            Term::value("active"),
-            Term {
-                retired: true,
-                ..Term::value("archived")
-            },
-        ];
+        let terms = vec![Term::value("active"), Term::value("archived").retired(true)];
         // A retired item alone warns...
         let warned = Value::Seq(vec![Value::Str("archived".into())]);
         assert!(matches!(
@@ -544,11 +603,7 @@ mod tests {
     fn display_label_falls_back_to_the_stored_value() {
         assert_eq!(Term::value("public").display_label(), "public");
         assert_eq!(
-            Term {
-                label: Some("Everyone".into()),
-                ..Term::value("public")
-            }
-            .display_label(),
+            Term::value("public").label("Everyone").display_label(),
             "Everyone"
         );
     }
