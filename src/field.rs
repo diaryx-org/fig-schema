@@ -36,9 +36,10 @@ impl FieldType {
     /// back to a string (the caller's own reparse is the final backstop);
     /// container types are not scalar-edited, so they also pass through as text.
     ///
-    /// Note that `Float` accepts the non-finite spellings Rust's parser does
-    /// (`inf`, `NaN`). fig renders those as YAML's `.inf`/`.nan`, but they have
-    /// no representation in JSON or TOML — an embedder targeting those formats
+    /// The numeric types go through [`Value::parse_number`], so the text fig
+    /// itself writes reads back unchanged — including the `.inf`/`.nan`
+    /// spellings `str::parse::<f64>` rejects. Those still have no
+    /// representation in JSON or TOML, so an embedder targeting those formats
     /// should reject them before they reach here.
     pub fn coerce(self, s: &str) -> Value {
         let t = s.trim();
@@ -59,15 +60,21 @@ impl FieldType {
                 "false" | "no" | "off" => Value::Bool(false),
                 _ => Value::Str(s.to_string()),
             },
-            FieldType::Int => t
-                .parse::<i64>()
-                .map(Value::Int)
-                .or_else(|_| t.parse::<u64>().map(Value::Uint))
-                .unwrap_or_else(|_| Value::Str(s.to_string())),
-            FieldType::Float => t
-                .parse::<f64>()
-                .map(Value::Float)
-                .unwrap_or_else(|_| Value::Str(s.to_string())),
+            // fig's own parser owns the widening rule (`i64`, then `u64`).
+            // It falls back to a float when the text is neither, which for a
+            // field declared `Int` is not a fit — so that lands in the string
+            // fallback like any other miss.
+            FieldType::Int => match Value::parse_number(t, false) {
+                Ok(v) if !v.is_f64() => v,
+                _ => Value::Str(s.to_string()),
+            },
+            // Via fig's parser so the `.inf`/`.nan` spellings fig *writes* read
+            // back as floats. `str::parse::<f64>` rejects them, so a no-op edit
+            // of a field holding `.inf` used to commit the string `".inf"` back
+            // over the float.
+            FieldType::Float => {
+                Value::parse_number(t, true).unwrap_or_else(|_| Value::Str(s.to_string()))
+            }
             FieldType::Extended(kind) => {
                 if extended_text_fits(kind, t) {
                     Value::Extended {
@@ -222,6 +229,36 @@ mod tests {
             assert_eq!(FieldType::Bool.coerce(no), Value::Bool(false), "{no}");
         }
         assert_eq!(FieldType::Bool.coerce("maybe"), Value::Str("maybe".into()));
+    }
+
+    #[test]
+    fn a_float_field_reads_back_the_spellings_fig_writes() {
+        // fig serializes a non-finite float as YAML's `.inf`/`.nan`, so that is
+        // the text an edit buffer holds. `str::parse::<f64>` rejects it, which
+        // meant a no-op edit committed the *string* `".inf"` over the float.
+        let inf = FieldType::Float.coerce(".inf");
+        assert!(matches!(inf, Value::Float(f) if f.is_infinite() && f.is_sign_positive()));
+        let neg = FieldType::Float.coerce("-.inf");
+        assert!(matches!(neg, Value::Float(f) if f.is_infinite() && f.is_sign_negative()));
+        assert!(matches!(FieldType::Float.coerce(".nan"), Value::Float(f) if f.is_nan()));
+        // Rust's own spellings still work, and ordinary floats are unaffected.
+        assert!(matches!(FieldType::Float.coerce("inf"), Value::Float(f) if f.is_infinite()));
+        assert_eq!(FieldType::Float.coerce("1.5"), Value::Float(1.5));
+        assert_eq!(FieldType::Float.coerce("nope"), Value::Str("nope".into()));
+    }
+
+    #[test]
+    fn an_int_field_does_not_widen_to_a_float() {
+        // `Value::parse_number` widens to a float as a last resort; a field
+        // declared `Int` treats that as a miss, so the documented string
+        // fallback still applies rather than a silent change of type.
+        assert_eq!(FieldType::Int.coerce("3"), Value::Int(3));
+        assert_eq!(FieldType::Int.coerce("3.5"), Value::Str("3.5".into()));
+        // Past `i64::MAX` is the one place `Uint` is the canonical variant.
+        assert_eq!(
+            FieldType::Int.coerce("9223372036854775808"),
+            Value::Uint(9_223_372_036_854_775_808)
+        );
     }
 
     #[test]
