@@ -12,4 +12,4 @@ categories = ["config", "data-structures", "parser-implementations"]
 publish = true
 
 [dependencies]
-fig = "3.0"
+fig = "3.2"
