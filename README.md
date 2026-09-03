@@ -20,6 +20,7 @@ commit-time validation plumbing is written once, here, and reused everywhere.
 | `Validation` / `Issue` / `IssueKind` | Why a value failed, as data rather than prose |
 | `Presentation` / `Icon` / `Tint` | Renderer-neutral display hints, carried but never interpreted |
 | `Consequence` / `Severity` | What changing a field *costs*, so a host can warn before an expensive or irreversible edit |
+| `lint_vocabulary` / `Finding` | Judge a vocabulary document rather than read it — what it declares that nothing acts on |
 
 Deliberately *not* here: a `Constraint` enum. Whether a field's constraint is a
 controlled vocabulary, a reference into a workspace, a range, or a pattern is the
@@ -70,6 +71,48 @@ assert_eq!(rejected.issue().unwrap().suggestion.as_deref(), Some("family"));
 assert_eq!(rule.severity_of(&Value::Str("public".into())), Some(Severity::Confirm));
 assert_eq!(rule.severity_of(&Value::Str("family".into())), None);
 ```
+
+## The command line
+
+```
+cargo install fig-schema
+fig-schema lint vocab/audience.figl
+```
+
+One command so far. `lint` reads a vocabulary document and reports what it
+declares that nothing acts on. **Errors** are findings that change what
+validation does; **notes** are findings that change only what a reader sees, and
+`--strict` fails on those too. It exits 0 when every file is clean, 1 when a
+document has an error, and 2 when the command line itself is wrong — a script
+sweeping a directory can tell "fix this document" from "fix this invocation"
+without reading the message.
+
+The finding it exists for is `values: cloesd`. That parses, loads, and validates
+— as an **open** vocabulary, because `parse_vocabulary` asks only whether the
+spelling is exactly `closed`. Every value the author meant to forbid is then
+accepted, and nothing else in this crate can notice, because an open vocabulary
+that rejects nothing is indistinguishable from one that was meant to be open.
+
+Installed on PATH it is also `fig schema lint <file>`: fig hands an action it has
+no verb for to a `fig-<action>` program, passing every argument through
+untouched, so the two compose with no registration step anywhere.
+
+The commands with more reach — `check`, `explain`, `complete` — need a `Schema`,
+and a `Schema` is constructible only in Rust until the schema document format
+lands. See `docs/tasks/`.
+
+Two limits worth knowing, both inherited rather than chosen:
+
+- **Findings carry a path, not a line and column.** fig hands back a value tree
+  with no per-node spans, so nothing downstream of a parse knows which line a key
+  came from. `vocabulary.values` is the most any consumer of the parse can say.
+- **It reads fewer formats than `fig check` does.** json, jsonc, json5, yaml,
+  toml and figl, plus a markdown file's frontmatter or endmatter block. fig's own
+  `check` also takes xml, ini, dotenv, properties, nestedtext and the canonical
+  form; the Rust binding has no variant for those, and the formats it *does*
+  name beyond fig's default language set need the Zig core compiled from source,
+  which `cargo install` must not require. `fig convert` moves a document into one
+  of them.
 
 ## Design notes
 

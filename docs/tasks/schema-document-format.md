@@ -14,6 +14,13 @@ and validated against — and a vocabulary document is that same document kind
 holding one rule, so anything already written to the `parse_vocabulary`
 convention keeps working unchanged.
 
+That equivalence needs its mapping stated when the format is written, because the
+two shapes do not agree on their face: `VocabularyDoc.field` is a bare key name
+and a rule's `at` is a `PathPat`. `field: audience` becomes
+`PathPat::key("audience")`, and it reaches the *items* of a list field only
+because `validate_enum` validates a sequence element-wise — not because the
+pattern says `audience[]`. It works, and it works for one reason, in one branch.
+
 ## Why
 
 A `Schema` is constructible only in Rust today: `FieldRule::new` plus chained
@@ -50,9 +57,17 @@ Comments surviving matters more here than usual, because the content is human
 judgment: why a term was retired, why a field is expensive.
 
 **Path patterns are a string with a small grammar** — `*` for `AnyKey`, `**` for
-`AnyDepth`, `[]` for `EachItem`, `[0]` for an index; keys containing a dot or a
-bracket are quoted. It is the part a person types most often, and a structured
-spelling of it is unreadable. It matches how `fig get` already addresses a path.
+`AnyDepth`, `[]` for `EachItem`, `[0]` for an index. It is the part a person
+types most often, and a structured spelling of it is unreadable.
+
+It *resembles* how `fig get` addresses a path rather than matching it, and the
+difference has to be decided rather than glossed. fig's `parsePath`
+(`src/cli/args.zig`) has **no quoting at all**: a key runs to the next `.` or
+`[`, so a key containing a dot is unaddressable there. It also reads `*` and
+`**` as ordinary keys, silently, and has `[-]`/`[$]` append sentinels that a
+pattern has no meaning for. So this is a second grammar overlapping the first,
+not an extension of it. Either accept that and say so in the format's own docs,
+or add quoting to fig first — which is a task there.
 
 **Many documents, not one root.** A document names what it governs and composes
 by reference. One root file listing every field is a file with three owners.
@@ -137,16 +152,40 @@ constraints; Hugo has archetypes rather than schemas.
 - Whether the format carries a version key, and what a reader does with a
   version it does not know — the same fail-closed/fail-open question as for
   constraint kinds, and it should probably be answered the same way.
+- **How a reader finds the schema governing a document at all.** Not asked by
+  the first draft, and load-bearing: include order carries precedence, so
+  discovery order *is* rule order. `--schema` and a walked-up file are different
+  answers with different failure modes.
+- **How a rule spells a per-term `tint`.** `Term::tint` exists and
+  `parse_vocabulary` does not read it, so a tint authored beside its term today
+  is silently dropped — `fig-schema lint` reports it. Teaching the parser that
+  key is a `Behavioural-change:`, since a `Tint` then starts arriving from user
+  data; `Tint::ALL` was added for exactly that release.
 
 ## What this unblocks
 
-A `fig-schema` command line — `check`, `explain`, `complete`, and a lint over a
-vocabulary document, which `guards_without_terms` already implements with no
-caller. `check` is the one with reach: `fig check` today only answers whether a
-file parses, and nothing in the toolchain answers whether it is valid.
+`check`, `explain` and `complete` — [a schema-aware command
+line](/docs/tasks/schema-aware-cli.md), which is now a task of its own because
+the binary exists and only these three commands are blocked on this document.
+`check` is the one with reach: `fig check` today only answers whether a file
+parses, and nothing in the toolchain answers whether it is valid.
+
+It also unblocks `guards_without_terms`, which still has no caller. Note that it
+cannot be reached by linting a *vocabulary* document, as an earlier draft of this
+task said: it takes a `&[Consequence]`, and a vocabulary document declares
+`field`, `values` and `terms` and no consequences at all. The lint that ships
+today (`fig-schema lint`) is over the silences in `parse_vocabulary`; a guard
+naming a value the vocabulary lacks is only checkable once a rule and its
+vocabulary are declared in one place, which is this document.
+
+Two things this does **not** unblock, because they are already done or already
+possible:
+
+- Making `fig` dispatch `fig schema …` to a `fig-schema` binary on PATH.
+  Shipped, in `cli/v4.0.0` — `src/cli/external.zig`, whose module doc names
+  `fig-schema` as the case it was written for.
+- The binary itself, which exists and lints.
 
 Further out, a schema-aware language server, which is a separate binary linking
 this crate — not `fig-lsp`, which is a figl language server and has no schema in
-it. Making `fig` dispatch `fig schema …` to a `fig-schema` binary on PATH, the
-way git finds a subcommand, is a change to `fig`'s CLI and belongs to a task
-there rather than this one.
+it. It wants per-node spans, which fig does not expose; see the CLI task.

@@ -1,15 +1,46 @@
 [package]
 name = "fig-schema"
-version = "0.2.1"
-edition = "2024"
-rust-version = "1.85"
-license = "MIT OR Apache-2.0"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
 description = "A generic, prov-agnostic schema layer over fig's value tree: field types, controlled vocabularies, and a reusable rule-matching engine."
-repository = "https://github.com/diaryx-org/fig-schema"
 readme = "README.md"
+documentation = "https://docs.rs/fig-schema"
 keywords = ["fig", "schema", "frontmatter", "validation", "vocabulary"]
-categories = ["config", "data-structures", "parser-implementations"]
+categories = ["config", "data-structures", "parser-implementations", "command-line-utilities"]
 publish = true
 
+# `xtask` is fig-schema's CI, as a program, as it is in historica-git and
+# historica-minisign: `cargo xtask <job>` runs one CI job and the workflow runs
+# nothing else.
+[workspace]
+members = ["xtask"]
+
+# One `version = "…"` line for the whole repository, which is what `dx bump`
+# rewrites and what the package inherits. Keeping it here rather than in
+# `[package]` is what lets the shared release tooling assert that exactly one
+# such line exists.
+[workspace.package]
+version = "0.2.1"
+edition = "2024"
+# Minimum supported Rust version, enforced by the `msrv` CI job, which reads
+# this value.
+rust-version = "1.85"
+license = "MIT OR Apache-2.0"
+repository = "https://github.com/diaryx-org/fig-schema"
+
+# The command line. No `required-features`, and that is the point: the argument
+# parsing is hand-rolled over `std::env::args`, exactly as fig's own CLI is, so
+# the binary costs the library nothing and `cargo install fig-schema` produces a
+# working `fig-schema` with no feature flag to remember. A crate whose whole
+# manifest is one dependency does not get to grow an argument parser.
+[[bin]]
+name = "fig-schema"
+path = "src/main.rs"
+
 [dependencies]
-fig = "3.2"
+# The one dependency, and the reason the schema document format can be a fig
+# document without adding a second: the parser is already here.
+fig = "3.3"

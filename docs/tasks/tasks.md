@@ -6,6 +6,7 @@ updated: 2026-09-02
 part_of: '[fig-schema](/README.md)'
 contents:
 - '[A schema document format](/docs/tasks/schema-document-format.md)'
+- '[A schema-aware command line](/docs/tasks/schema-aware-cli.md)'
 ---
 
 # Tasks
