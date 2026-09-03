@@ -154,8 +154,17 @@ constraints; Hugo has archetypes rather than schemas.
   constraint kinds, and it should probably be answered the same way.
 - **How a reader finds the schema governing a document at all.** Not asked by
   the first draft, and load-bearing: include order carries precedence, so
-  discovery order *is* rule order. `--schema` and a walked-up file are different
-  answers with different failure modes.
+  discovery order *is* rule order. The CLI task has settled its side: an
+  explicit `--schema`, repeatable in precedence order, is the whole schema when
+  given; otherwise the *nearest* discovery file walking up from the document,
+  one file and never a merge of the ones above it, so precedence is always
+  written in one document's include order. What is left here is the file's
+  name — `.fig-schema.<ext>` is proposed — and the include semantics that
+  document carries.
+- **Whether a rule can say a field must be present.** `FieldRule` says what a
+  value must be if there is one, and nothing says there must be one, so
+  `check` never reports a missing field. If that is wanted it is a fact about
+  the rule and belongs in this format, not in the checker.
 - **How a rule spells a per-term `tint`.** `Term::tint` exists and
   `parse_vocabulary` does not read it, so a tint authored beside its term today
   is silently dropped — `fig-schema lint` reports it. Teaching the parser that
@@ -169,6 +178,20 @@ line](/docs/tasks/schema-aware-cli.md), which is now a task of its own because
 the binary exists and only these three commands are blocked on this document.
 `check` is the one with reach: `fig check` today only answers whether a file
 parses, and nothing in the toolchain answers whether it is valid.
+
+That task asks two things of the loader, stated here so the format is designed
+with them rather than around them:
+
+- **A constraint type of this crate's own,** with a variant for every kind the
+  format defines and one for a kind it does not. The unknown-kind variant
+  validates to `Reject(Issue { kind: IssueKind::Unchecked(kind) })` — the
+  fail-closed rule above, spelled so that a reader which knows the variant can
+  tell *unchecked* from *wrong*. An embedder maps the kinds it knows into its
+  own type and keeps the seam.
+- **A rule that remembers where it was read from** — which document, and which
+  position in it — so `explain` can print which rule won at a path and which
+  later ones it shadows. Precedence that include order decides has to be
+  visible somewhere, and this is where.
 
 It also unblocks `guards_without_terms`, which still has no caller. Note that it
 cannot be reached by linting a *vocabulary* document, as an earlier draft of this
