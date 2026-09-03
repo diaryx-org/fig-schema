@@ -29,6 +29,13 @@
 //!   shared `vocabulary: { field, values }` / `terms:` document convention, so
 //!   independent embedders can point at the same vocabulary document without
 //!   either depending on the other.
+//! - [`lint_vocabulary`] / [`Finding`] — judge such a document rather than read
+//!   it. [`parse_vocabulary`] is permissive by design (a key it cannot read is
+//!   a key it skips), which leaves a set of ways a document can say something
+//!   nothing acts on — `values: cloesd` loading as an *open* vocabulary being
+//!   the one with teeth. This is where an author is told. The `fig-schema`
+//!   binary in this crate is a front end for it, reachable as `fig schema lint`
+//!   wherever fig is installed.
 //! - [`Presentation`] / [`Icon`] / [`Tint`] — renderer-neutral display hints,
 //!   carried on every rule but never interpreted here.
 //! - [`Consequence`] / [`Severity`] — what changing a field *costs*, so a host
@@ -98,12 +105,14 @@
 
 mod consequence;
 mod field;
+mod lint;
 mod path;
 mod present;
 mod vocab;
 
 pub use consequence::{Consequence, Severity, guards_without_terms};
 pub use field::{FieldRule, FieldType, Schema};
+pub use lint::{Finding, FindingKind, lint_vocabulary};
 pub use path::{PathPat, Seg, SegPat};
 pub use present::{Icon, Presentation, Tint};
 pub use vocab::{
