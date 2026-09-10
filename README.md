@@ -100,7 +100,8 @@ untouched, so the two compose with no registration step anywhere.
 
 The commands with more reach — `check`, `explain`, `complete` — need a `Schema`,
 and a `Schema` is constructible only in Rust until the schema document format
-lands. See `docs/tasks/`.
+lands. The format is designed — [`docs/schema-format.md`](docs/schema-format.md)
+— and the loader is the open work; see `docs/tasks/`.
 
 Two limits worth knowing, both inherited rather than chosen:
 

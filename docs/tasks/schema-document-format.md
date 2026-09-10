@@ -2,8 +2,8 @@
 title: A schema document format
 author: adammharris
 created: 2026-09-02
-updated: 2026-09-02
-status: open
+updated: 2026-09-10
+status: in-progress
 part_of: '[tasks](/docs/tasks/tasks.md)'
 ---
 
@@ -20,6 +20,13 @@ and a rule's `at` is a `PathPat`. `field: audience` becomes
 `PathPat::key("audience")`, and it reaches the *items* of a list field only
 because `validate_enum` validates a sequence element-wise — not because the
 pattern says `audience[]`. It works, and it works for one reason, in one branch.
+
+**The format is designed** — [docs/schema-format.md](/docs/schema-format.md),
+status `draft` until the loader reads it. This task keeps the argument and
+what was not adopted; the spec keeps the format. What remains is the code:
+`Constraint`, `Origin`, `parse_schema`, `load_schema`, `lint` over a schema
+document, and the three engine adjustments under [What the design
+changed](#what-the-design-changed).
 
 ## Why
 
@@ -87,7 +94,8 @@ This is the one rule that keeps the constraint seam intact across the boundary:
 a CLI cannot know what a workspace-reference constraint means, and must neither
 pretend it passed nor refuse to render the field.
 
-A strawman, in figl:
+The first strawman, in figl — superseded by the spec, and kept because [What
+the design changed](#what-the-design-changed) is measured against it:
 
 ```fig
 schema = diaryx/note
@@ -141,35 +149,68 @@ Frontmatter tooling has no incumbent to defer to: Astro uses Zod, which is
 TypeScript rather than a document; Obsidian properties are a type map with no
 constraints; Hugo has archetypes rather than schemas.
 
-## Open questions
+## Settled
 
-- How `constraint.from` resolves a relative path, and whether a reference that
-  is not a local file is allowed at all.
-- How `FieldType::Extended(ExtKind)` spells its kind, given both that enum and
-  this crate's types are `#[non_exhaustive]` and fig gains kinds independently.
-- Whether include order alone settles precedence when two included documents
-  both match a path, or a document may state an explicit order.
-- Whether the format carries a version key, and what a reader does with a
-  version it does not know — the same fail-closed/fail-open question as for
-  constraint kinds, and it should probably be answered the same way.
-- **How a reader finds the schema governing a document at all.** Not asked by
-  the first draft, and load-bearing: include order carries precedence, so
-  discovery order *is* rule order. The CLI task has settled its side: an
-  explicit `--schema`, repeatable in precedence order, is the whole schema when
-  given; otherwise the *nearest* discovery file walking up from the document,
-  one file and never a merge of the ones above it, so precedence is always
-  written in one document's include order. What is left here is the file's
-  name — `.fig-schema.<ext>` is proposed — and the include semantics that
-  document carries.
-- **Whether a rule can say a field must be present.** `FieldRule` says what a
-  value must be if there is one, and nothing says there must be one, so
-  `check` never reports a missing field. If that is wanted it is a fact about
-  the rule and belongs in this format, not in the checker.
-- **How a rule spells a per-term `tint`.** `Term::tint` exists and
-  `parse_vocabulary` does not read it, so a tint authored beside its term today
-  is silently dropped — `fig-schema lint` reports it. Teaching the parser that
-  key is a `Behavioural-change:`, since a `Tint` then starts arriving from user
-  data; `Tint::ALL` was added for exactly that release.
+Every question the first draft left open is answered in the spec; the answers
+are listed here so the reasoning is findable from the task.
+
+- **`constraint.from` and `include` resolve against the directory of the
+  document that wrote them.** An absolute path is absolute; there is no
+  root-relative spelling because the loader has no root; a URL is a string that
+  fails to read. Nothing but a local file is a reference.
+- **`Extended` kinds are spelled prov's way** — `date`, `datetime`,
+  `local-datetime`, `time` — because prov's `config-vocab.md` already uses
+  those and says the vocabulary is this crate's. `enum` and `char` for the ZON
+  kinds, after figl's own annotation names. An unknown type is a load error,
+  not a dropped type; the crate's `Display` for `FieldType` moves to these
+  spellings.
+- **Precedence is one written order.** An include is an *entry* in `rules`,
+  spliced depth-first where it is written, rather than a top-level key with a
+  rule about whether it goes before or after. A document that needs a base to
+  win over its own catch-all includes it first; one that overrides a base
+  includes it after. There is no explicit order key because the list is one.
+- **`schema.spec = 1` is the version, and an unknown one refuses to load.**
+  The fail-open half of the rule has nothing to apply to: a presenter cannot
+  draw a rule it could not read.
+- **Discovery is `.fig-schema.<ext>` or `.config/fig-schema.<ext>`, nearest
+  wins, both in one directory is an error.** Hidden because a notes vault is
+  the ordinary home; the `.config/` spelling because prov and diaryx already
+  keep a workspace's own configuration there.
+- **Presence is deferred**, with the shape it would take (`required = true` on
+  a rule with a concrete key) and the reason it waits: it is a fact about a
+  document, this format is a list of facts about paths, and what "present"
+  means for a written null wants real documents in hand.
+- **`tint` on a term is read**, inline and in a vocabulary document, by the
+  release that ships the loader — the `Behavioural-change:` `Tint::ALL` was
+  added for.
+
+## What the design changed
+
+Three things in the engine, found by reading the consumers rather than the
+model. All are to the unreleased library half of [the CLI
+task](/docs/tasks/schema-aware-cli.md), so none is a behavioural change yet.
+
+- **`FieldType::admits` follows the item-list convention.** provui emits the
+  same `ty: Str` on `audience` and `audience[]`, and prov's docs say a declared
+  field is governed "whether written as a single value or a list". A strict
+  `admits` calls `audience: [public]` a mismatch under that rule. So a type
+  admits a value of that type *or a sequence whose every item is one*, one
+  level deep — the convention `validate_enum` already follows. `check` then
+  drops a container's type mismatch when a descendant reported one, the way it
+  already drops a repeated constraint issue.
+- **A date type admits a string shaped like one.** YAML, JSON and markdown
+  frontmatter have no date literal, so `created: 1979-05-27` there is text,
+  and prov's docs already call that asymmetry harmless. `Extended(k)` admits an
+  extended value of kind `k` *or* a string that `extended_text_fits(k, ..)` —
+  the same guard `coerce` uses when writing one.
+- **`Display for FieldType` spells the extended kinds prov's way.** Above.
+
+The strawman also changed shape in passing: `rule[]` is `rules[]`, matching
+prov's plural keys; `on-change` is `on_change`, matching every other key in the
+organisation; `schema = <name>` is `schema.spec = 1`, since a name had no
+reader and a version does; and a vocabulary's `values`/`terms` inline in a rule
+are spelled exactly as the vocabulary document spells them, so there is one
+spelling of a term set and not two.
 
 ## What this unblocks
 
@@ -179,8 +220,8 @@ the binary exists and only these three commands are blocked on this document.
 `check` is the one with reach: `fig check` today only answers whether a file
 parses, and nothing in the toolchain answers whether it is valid.
 
-That task asks two things of the loader, stated here so the format is designed
-with them rather than around them:
+That task asks two things of the loader, and the spec's [Loading](/docs/schema-format.md#loading)
+section carries them:
 
 - **A constraint type of this crate's own,** with a variant for every kind the
   format defines and one for a kind it does not. The unknown-kind variant
