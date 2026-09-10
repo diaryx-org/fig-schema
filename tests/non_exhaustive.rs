@@ -10,8 +10,8 @@
 use fig::Value;
 use fig_schema::{
     Cardinality, Consequence, FieldRule, FieldType, Icon, Issue, IssueKind, PathPat, Presentation,
-    Schema, Seg, SegPat, Severity, Term, Tint, Validate, Validation, VocabularyDoc,
-    guards_without_terms, parse_vocabulary, validate_enum,
+    Schema, Seg, SegPat, Severity, Term, Tint, Validate, Validation, Verdict, VerdictKind,
+    VocabularyDoc, guards_without_terms, parse_vocabulary, render_path, validate_enum,
 };
 
 /// An embedder's own constraint type — the seam the crate is built around.
@@ -167,6 +167,15 @@ fn every_issue_kind_is_still_constructible_and_readable() {
         Issue::custom("../nope", "no such note").kind,
         IssueKind::Custom("no such note".into())
     );
+    // The unknown-kind answer an embedder's constraint type gives for a kind
+    // it maps but cannot check — and the reader's side of it.
+    let unchecked = Issue::unchecked("../nope", "workspace-reference");
+    assert_eq!(
+        unchecked.kind,
+        IssueKind::Unchecked("workspace-reference".into())
+    );
+    assert!(unchecked.is_unchecked());
+    assert!(!Issue::unknown("x").is_unchecked());
     // The English default still renders for an embedder that doesn't localize.
     assert_eq!(
         unknown.to_string(),
@@ -293,6 +302,95 @@ fn the_closed_scales_are_still_exhaustively_matchable() {
         Seg::Index(i) => i.to_string(),
     };
     assert_eq!(seg(&Seg::Index(2)), "2");
+}
+
+#[test]
+fn a_whole_document_check_is_reachable_and_its_verdicts_are_readable() {
+    /// A constraint type with a kind the embedder cannot check itself.
+    enum Constraint {
+        Vocabulary(Vocabulary),
+        Elsewhere(&'static str),
+    }
+    impl Validate for Constraint {
+        fn validate(&self, value: &Value) -> Validation {
+            match self {
+                Constraint::Vocabulary(v) => v.validate(value),
+                Constraint::Elsewhere(kind) => Validation::Reject(Issue::unchecked("", *kind)),
+            }
+        }
+    }
+
+    let schema = Schema::new(vec![
+        FieldRule::new(PathPat::each_item_of("audience"))
+            .ty(FieldType::Str)
+            .constraint(Constraint::Vocabulary(Vocabulary {
+                values: vec![Term::value("public"), Term::value("family")],
+                closed: true,
+            })),
+        FieldRule::new(PathPat::key("count")).ty(FieldType::Int),
+        FieldRule::new(PathPat::key("part_of"))
+            .ty(FieldType::Ref)
+            .constraint(Constraint::Elsewhere("workspace-reference")),
+    ]);
+    let document = fig::Document::parse(
+        b"audience: [famly]
+count: three
+part_of: ../index.md
+",
+        fig::Format::Yaml,
+    )
+    .unwrap();
+    let verdicts: Vec<Verdict> = schema.check(&document.to_value().unwrap());
+    assert_eq!(verdicts.len(), 3);
+
+    // Every field is readable, and a `Verdict` is addressed the way a
+    // `Finding` is — but keeps the segments, so a row can be found again.
+    assert_eq!(
+        verdicts[0].path,
+        vec![Seg::Key("audience".into()), Seg::Index(0)]
+    );
+    assert_eq!(verdicts[0].at(), "audience[0]");
+    assert_eq!(render_path(&verdicts[0].path), verdicts[0].at());
+    assert!(verdicts[0].is_error());
+    assert!(matches!(
+        &verdicts[0].kind,
+        VerdictKind::Constraint(Validation::Reject(_))
+    ));
+
+    // `VerdictKind` is `#[non_exhaustive]`, so a downstream match takes `_`.
+    let described = |v: &Verdict| match &v.kind {
+        VerdictKind::TypeMismatch { expected, found } => format!("{expected} vs {found}"),
+        VerdictKind::Constraint(validation) => validation
+            .issue()
+            .map(ToString::to_string)
+            .unwrap_or_default(),
+        _ => "something newer".into(),
+    };
+    assert_eq!(described(&verdicts[1]), "int vs str");
+
+    // The three buckets a reader files verdicts under.
+    assert!(verdicts[1].is_error() && !verdicts[1].is_unchecked());
+    assert!(verdicts[2].is_unchecked() && !verdicts[2].is_error());
+    assert_eq!(verdicts[2].at(), "part_of");
+}
+
+#[test]
+fn the_shape_half_of_a_check_and_every_matching_rule_are_reachable() {
+    assert!(FieldType::Float.admits(&Value::Int(1)));
+    assert!(!FieldType::Int.admits(&Value::Str("1".into())));
+    assert_eq!(FieldType::of(&Value::Bool(true)), FieldType::Bool);
+    assert_eq!(FieldType::Seq.to_string(), "seq");
+
+    let schema: Schema<Vocabulary> = Schema::new(vec![
+        FieldRule::new(PathPat::key("title")).ty(FieldType::Str),
+        FieldRule::new(PathPat(vec![SegPat::AnyDepth])).ty(FieldType::Null),
+    ]);
+    let title = [Seg::Key("title".into())];
+    let all: Vec<&FieldRule<Vocabulary>> = schema.rules_for(&title).collect();
+    assert_eq!(all.len(), 2);
+    assert_eq!(all[0].ty, schema.rule_for(&title).unwrap().ty);
+    // What the winner shadows.
+    assert_eq!(all[1].ty, Some(FieldType::Null));
 }
 
 #[test]

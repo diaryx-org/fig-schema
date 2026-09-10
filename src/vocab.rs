@@ -237,6 +237,17 @@ pub enum IssueKind {
     /// An embedder-defined issue (a dangling reference, a range violation, …),
     /// carrying its own rendered message.
     Custom(String),
+    /// The value was not checked at all, because the constraint is of a kind
+    /// this validator does not know — named here, so a reader can say which.
+    ///
+    /// Always carried by a [`Validation::Reject`], never a
+    /// [`Validation::Warn`]: a validator that skipped a rule cannot answer
+    /// "valid", so it fails closed, and an editor that does not know the kind
+    /// must not commit the value. What this variant adds is that a reader who
+    /// *does* know it can tell *unchecked* from *wrong* — `fig-schema check`
+    /// files one under its own heading, and exits 3 rather than 1 when nothing
+    /// else is amiss. See [`Issue::unchecked`].
+    Unchecked(String),
 }
 
 impl Issue {
@@ -267,10 +278,30 @@ impl Issue {
         }
     }
 
+    /// A value that could not be checked, because its constraint is of a
+    /// `kind` this validator does not know. Wrap it in [`Validation::Reject`]
+    /// — the fail-closed half of the rule is the caller's — and see
+    /// [`IssueKind::Unchecked`] for the other half.
+    pub fn unchecked(value: impl Into<String>, kind: impl Into<String>) -> Self {
+        Self {
+            kind: IssueKind::Unchecked(kind.into()),
+            value: value.into(),
+            suggestion: None,
+        }
+    }
+
     /// Attach a near-miss suggestion.
     pub fn with_suggestion(mut self, suggestion: impl Into<String>) -> Self {
         self.suggestion = Some(suggestion.into());
         self
+    }
+
+    /// Whether this says the value was *not checked* rather than that it is
+    /// wrong — see [`IssueKind::Unchecked`]. A rejection carrying one is still
+    /// a rejection; this is how a reader that wants to report the two
+    /// differently tells them apart.
+    pub fn is_unchecked(&self) -> bool {
+        matches!(self.kind, IssueKind::Unchecked(_))
     }
 }
 
@@ -280,6 +311,10 @@ impl fmt::Display for Issue {
             IssueKind::Custom(message) => f.write_str(message)?,
             IssueKind::Unknown => write!(f, "“{}” is not a known value", self.value)?,
             IssueKind::Retired => write!(f, "“{}” is retired and no longer offered", self.value)?,
+            IssueKind::Unchecked(kind) => write!(
+                f,
+                "a “{kind}” constraint, which this validator cannot check"
+            )?,
         }
         if let Some(suggestion) = &self.suggestion {
             write!(f, " — did you mean “{suggestion}”?")?;
@@ -597,6 +632,25 @@ mod tests {
             Issue::custom("../nope", "no such note").to_string(),
             "no such note"
         );
+        assert_eq!(
+            Issue::unchecked("../note.md", "workspace-reference").to_string(),
+            "a “workspace-reference” constraint, which this validator cannot check"
+        );
+    }
+
+    #[test]
+    fn an_unchecked_issue_is_told_apart_from_a_wrong_one() {
+        let unchecked = Issue::unchecked("x", "workspace-reference");
+        assert!(unchecked.is_unchecked());
+        assert_eq!(
+            unchecked.kind,
+            IssueKind::Unchecked("workspace-reference".into())
+        );
+        assert!(!Issue::unknown("x").is_unchecked());
+        assert!(!Issue::custom("x", "no").is_unchecked());
+        // Still a rejection, because a validator that skipped a rule cannot
+        // answer "valid" — the fail-closed half of the rule.
+        assert!(Validation::Reject(unchecked).is_reject());
     }
 
     #[test]

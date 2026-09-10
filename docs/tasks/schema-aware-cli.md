@@ -2,8 +2,8 @@
 title: A schema-aware command line
 author: adammharris
 created: 2026-09-02
-updated: 2026-09-02
-status: open
+updated: 2026-09-10
+status: in-progress
 part_of: '[tasks](/docs/tasks/tasks.md)'
 ---
 
@@ -63,7 +63,7 @@ constraint. The report is `lint`'s report with one more heading:
 note.md
   errors:
     - audience[1]: “famly” is not a known value — did you mean “family”?
-    - count: expected int, found text
+    - count: expected int, found str
   notes:
     - status: “archived” is retired and no longer offered
   unchecked:
@@ -231,27 +231,35 @@ Exit 0 when the question was answered, including with an empty offer.
 
 ### What the library gains
 
-The binary renders; these are the decisions, and every one is testable with a
-`Schema` built in Rust before the loader exists.
+**Shipped, unreleased** — in the commit that set this task `in-progress`. The
+binary renders; these are the decisions, and every one is tested against a
+`Schema` built in Rust, ahead of the loader.
 
-- **`IssueKind::Unchecked(String)`.** Above.
+- **`IssueKind::Unchecked(String)`.** Above. `Issue::unchecked(value, kind)`
+  builds one and `Issue::is_unchecked` reads it.
 - **`FieldType::admits(&Value) -> bool`.** The shape half of a check, which
-  nothing does today: `coerce` reads an edit buffer *into* a type, and nothing
-  asks whether a parsed value already *has* one. `Float` admits an int, `Ref`
+  nothing did before: `coerce` reads an edit buffer *into* a type, and nothing
+  asked whether a parsed value already *has* one. `Float` admits an int, `Ref`
   admits a string (it is stored as one), `Extended(k)` admits an extended value
-  of kind `k`.
+  of kind `k` and nothing else — so a date written in a format with no date
+  literal is a string, and a mismatch. Beside it, **`FieldType::of(&Value)`**,
+  the type a value has, total over `Value`; it is what a mismatch reports as
+  `found`, and `FieldType` gained a `Display` spelling types the way the format
+  will (`int`, `str`, `seq`; an extended kind as `local-date`). The `Extended`
+  spellings are provisional until the format task fixes them.
 - **`Schema::check(&Value) -> Vec<Verdict>`.** The walk, with the three rules
-  above. A `Verdict` is addressed by dotted path exactly as a `Finding` is, and
-  carries either a type mismatch or a `Validation`. An embedder that today
-  validates one edit at a time gets a whole-document check from the same
-  schema.
+  above. A `Verdict` carries either a type mismatch or a `Validation`, and is
+  addressed by dotted path as a `Finding` is — through `Verdict::at()`, over a
+  `path: Vec<Seg>` it keeps, so an editor can find the row again without
+  parsing the text back. `is_error` and `is_unchecked` are the report's three
+  headings.
 - **`Schema::rules_for(&[Seg])`.** Every matching rule in precedence order;
   `rule_for` is its first element. What `explain`'s `shadows:` reads.
-- **A path rendered as text, next to a path parsed from text.** `Finding.at`
-  builds `terms.public.retired` by hand today and `Warning.path` in fig spells
-  an index `[i]`. One function in `path.rs` owns the spelling, and the format
-  task's pattern parser is its inverse in the same file, so the two grammars
-  cannot drift.
+- **A path rendered as text, next to a path parsed from text.** `render_path`
+  in `path.rs` owns the spelling — keys joined by `.`, an index as `[i]`, the
+  root as `""` — and the format task's pattern parser is its inverse in the
+  same file, so the two grammars cannot drift. `Finding.at` still builds its
+  paths by hand and agrees by inspection.
 
 From the format task, the CLI needs two things and states them there: a
 constraint type of the crate's own whose unknown-kind variant validates to
@@ -260,9 +268,9 @@ position it was read from.
 
 ### Order of work
 
-1. The library half, one release: the four additions above, tested against
-   Rust-built schemas. Minor version; `Unchecked` is a new variant of a
-   `#[non_exhaustive]` enum.
+1. ~~The library half, one release: the four additions above, tested against
+   Rust-built schemas.~~ Done; awaiting a release, whose version is Adam's to
+   name — `Unchecked` is a new variant of a `#[non_exhaustive]` enum.
 2. The loader, in the format task.
 3. The three verbs, with `tests/cli.rs` asserting exit codes on the real binary
    the way it does for `lint` — 3 among them.

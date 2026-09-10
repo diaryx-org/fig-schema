@@ -15,9 +15,10 @@ commit-time validation plumbing is written once, here, and reused everywhere.
 | Type | Role |
 | --- | --- |
 | `PathPat` / `SegPat` | Match a fig path, including every item of a list (`EachItem`) and whole subtrees (`AnyDepth`) |
-| `FieldType` | The expected type, and type-directed coercion of an edit buffer (`FieldType::coerce`) |
+| `FieldType` | The expected type: coercion of an edit buffer into it (`FieldType::coerce`), and whether a parsed value already has it (`FieldType::admits`) |
 | `Term` / `Cardinality` / `validate_enum` | A controlled vocabulary and the logic to check a value against one |
-| `Validation` / `Issue` / `IssueKind` | Why a value failed, as data rather than prose |
+| `Validation` / `Issue` / `IssueKind` | Why a value failed, as data rather than prose — or that it was not checked at all (`IssueKind::Unchecked`) |
+| `Schema::check` / `Verdict` | A whole document against the schema: every node's shape against its rule's type, and its value against the rule's constraint |
 | `Presentation` / `Icon` / `Tint` | Renderer-neutral display hints, carried but never interpreted |
 | `Consequence` / `Severity` | What changing a field *costs*, so a host can warn before an expensive or irreversible edit |
 | `lint_vocabulary` / `Finding` | Judge a vocabulary document rather than read it — what it declares that nothing acts on |
@@ -118,6 +119,19 @@ Two limits worth knowing, both inherited rather than chosen:
 
 **Rule precedence is declaration order.** `Schema::rule_for` returns the first
 matching rule, so list a specific rule before a broader one that would also match.
+`Schema::rules_for` returns every match in that order — the winner first, then
+what it shadows — so a tool can show the precedence rather than leave it inferred.
+
+**A check never reports a missing field.** A `FieldRule` says what a value must
+be if there is one, and nothing says there must be one, so an empty document is
+valid. Nor does it report a node no rule governs: a schema governs what it
+names, and a check that fires on correct documents is one people stop running.
+
+**Unchecked is not wrong.** A constraint of a kind a validator does not know
+fails closed — `Validation::Reject` carrying `IssueKind::Unchecked(kind)` — so an
+editor that does not look further will not commit the value. A reader that does
+look can tell *unchecked* from *invalid*, and `Verdict::is_unchecked` is that
+look.
 
 **Retired terms warn, they don't reject.** A `Term` marked `retired` is still a
 *known* value — it is merely no longer offered in a picker. A document that

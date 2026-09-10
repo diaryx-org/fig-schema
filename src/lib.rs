@@ -45,6 +45,14 @@
 //! - [`Issue`] / [`IssueKind`] — why a value failed, as data rather than
 //!   prose, so the embedder owns the wording. [`Issue`]'s `Display` renders a
 //!   reasonable English default for embedders that don't care.
+//!   [`IssueKind::Unchecked`] is the one that says a value was *not checked*
+//!   rather than that it is wrong — a constraint of a kind the validator does
+//!   not know fails closed, and this is how a reader tells the two apart.
+//! - [`Schema::check`] / [`Verdict`] — the whole-document check: every node
+//!   against the rule that governs it, its shape against the rule's type
+//!   ([`FieldType::admits`]) and its value against the rule's constraint.
+//!   What `fig check` does not answer: not whether a file parses, but whether
+//!   what it parsed is valid.
 //!
 //! The public structs are `#[non_exhaustive]`, so they are built from a
 //! constructor plus chainable setters ([`FieldRule::new`], [`Term::value`],
@@ -103,6 +111,7 @@
 //! );
 //! ```
 
+mod check;
 mod consequence;
 mod field;
 mod lint;
@@ -110,10 +119,11 @@ mod path;
 mod present;
 mod vocab;
 
+pub use check::{Verdict, VerdictKind};
 pub use consequence::{Consequence, Severity, guards_without_terms};
 pub use field::{FieldRule, FieldType, Schema};
 pub use lint::{Finding, FindingKind, lint_vocabulary};
-pub use path::{PathPat, Seg, SegPat};
+pub use path::{PathPat, Seg, SegPat, render_path};
 pub use present::{Icon, Presentation, Tint};
 pub use vocab::{
     Cardinality, Issue, IssueKind, Term, Validate, Validation, VocabularyDoc, parse_vocabulary,

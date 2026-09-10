@@ -5,6 +5,12 @@
 //! generalized to also reach *every* item of a sequence, *every* entry of a
 //! mapping, or an entire subtree, so one rule can govern each element of a list
 //! field or everything nested under a key.
+//!
+//! [`render_path`] is the one place a concrete path is spelled as text. The
+//! pattern grammar the schema document format reads (`*`, `**`, `[]`, `[0]`)
+//! is its inverse and belongs in this file beside it, so the two cannot drift.
+
+use std::fmt::Write as _;
 
 /// One step of a fig path: a mapping key or a sequence index. Owned (unlike
 /// `fig::Segment<'a>`, which borrows), so a path can outlive a single FFI call.
@@ -63,6 +69,41 @@ impl PathPat {
     pub fn matches(&self, path: &[Seg]) -> bool {
         matches_from(&self.0, path)
     }
+}
+
+/// A concrete path as text: keys joined by `.`, an index as `[i]`, and the
+/// empty string for the document root — `meta.author`, `audience[1]`,
+/// `items[0].title`. This is how fig's own `Warning` addresses a node and how
+/// a [`Finding`](crate::Finding) does, so the three agree.
+///
+/// A key containing `.` or `[` renders ambiguously, exactly as it does in fig;
+/// the grammar has no quoting, and this crate does not add one on its own.
+///
+/// ```
+/// use fig_schema::{Seg, render_path};
+///
+/// let path = [Seg::Key("audience".into()), Seg::Index(1)];
+/// assert_eq!(render_path(&path), "audience[1]");
+/// assert_eq!(render_path(&[]), "");
+/// ```
+pub fn render_path(path: &[Seg]) -> String {
+    let mut out = String::new();
+    for seg in path {
+        match seg {
+            Seg::Key(k) => {
+                if !out.is_empty() {
+                    out.push('.');
+                }
+                out.push_str(k);
+            }
+            // Never an allocation failure on a `String`, so the result is
+            // safe to drop.
+            Seg::Index(i) => {
+                let _ = write!(out, "[{i}]");
+            }
+        }
+    }
+    out
 }
 
 /// Match `pats` against `path`, allowing [`SegPat::AnyDepth`] to consume any
@@ -150,6 +191,28 @@ mod tests {
         let pat = PathPat::key("meta");
         assert!(pat.matches(&[key("meta")]));
         assert!(!pat.matches(&[key("meta"), key("author")]));
+    }
+
+    #[test]
+    fn a_path_renders_the_way_fig_spells_one() {
+        assert_eq!(render_path(&[]), "");
+        assert_eq!(render_path(&[key("title")]), "title");
+        assert_eq!(render_path(&[key("meta"), key("author")]), "meta.author");
+        assert_eq!(
+            render_path(&[key("audience"), Seg::Index(1)]),
+            "audience[1]"
+        );
+        // An index takes no dot, before or after; a key after one does.
+        assert_eq!(
+            render_path(&[key("items"), Seg::Index(0), key("title")]),
+            "items[0].title"
+        );
+        assert_eq!(
+            render_path(&[key("grid"), Seg::Index(0), Seg::Index(2)]),
+            "grid[0][2]"
+        );
+        // A root that is itself a sequence.
+        assert_eq!(render_path(&[Seg::Index(3)]), "[3]");
     }
 
     #[test]

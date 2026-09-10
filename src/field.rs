@@ -5,6 +5,8 @@
 //! a reference into a workspace, or a sum of both) by implementing
 //! [`crate::Validate`] on it.
 
+use std::fmt;
+
 use fig::{ExtKind, Value};
 
 use crate::consequence::Consequence;
@@ -37,6 +39,47 @@ pub enum FieldType {
 }
 
 impl FieldType {
+    /// The type a parsed `value` *has* — the shape half of a check, and the
+    /// counterpart of [`FieldType::coerce`], which reads text *into* a type.
+    /// Total: every [`Value`] has one. A [`Value::Uint`] is an [`Int`](Self::Int),
+    /// since that is only fig's spelling for an integer past `i64::MAX`.
+    ///
+    /// Never [`Ref`](Self::Ref): a reference is stored as text, and nothing in
+    /// the value says it is one. [`FieldType::admits`] is where `Ref` accepts a
+    /// string.
+    pub fn of(value: &Value) -> FieldType {
+        match value {
+            Value::Null => FieldType::Null,
+            Value::Bool(_) => FieldType::Bool,
+            Value::Int(_) | Value::Uint(_) => FieldType::Int,
+            Value::Float(_) => FieldType::Float,
+            Value::Str(_) => FieldType::Str,
+            Value::Extended { kind, .. } => FieldType::Extended(*kind),
+            Value::Seq(_) => FieldType::Seq,
+            Value::Map(_) => FieldType::Map,
+        }
+    }
+
+    /// Whether a parsed `value` already has this type — the question a
+    /// whole-document check asks at every governed node, which
+    /// [`FieldType::coerce`] does not: that reads an edit buffer *into* a
+    /// type, and this asks whether what the parser produced fits one.
+    ///
+    /// Mostly [`FieldType::of`] and equality, plus the widenings a reader
+    /// expects: [`Float`](Self::Float) admits an integer, and
+    /// [`Ref`](Self::Ref) admits a string, since a reference is stored as one.
+    /// [`Extended`](Self::Extended) admits an extended value of the same kind
+    /// and nothing else — a format with no literal for the kind parses it as a
+    /// string, and that string is a mismatch here.
+    pub fn admits(self, value: &Value) -> bool {
+        let found = FieldType::of(value);
+        match self {
+            FieldType::Float => matches!(found, FieldType::Float | FieldType::Int),
+            FieldType::Ref => found == FieldType::Str,
+            expected => found == expected,
+        }
+    }
+
     /// Coerce an edit-buffer string to this type — the schema-directed
     /// counterpart of shape-guessing. A value that doesn't fit the type falls
     /// back to a string (the caller's own reparse is the final backstop);
@@ -97,6 +140,36 @@ impl FieldType {
                 Value::Str(s.to_string())
             }
         }
+    }
+}
+
+impl fmt::Display for FieldType {
+    /// The type's name as the schema document format spells it — `int`,
+    /// `str`, `seq` — so a message reads the way the rule was written. An
+    /// extended kind is its fig name in kebab case (`local-date`), or
+    /// `extended` for a kind newer than this crate.
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.write_str(match self {
+            FieldType::Null => "null",
+            FieldType::Bool => "bool",
+            FieldType::Int => "int",
+            FieldType::Float => "float",
+            FieldType::Str => "str",
+            FieldType::Ref => "ref",
+            FieldType::Map => "map",
+            FieldType::Seq => "seq",
+            FieldType::Extended(kind) => match kind {
+                ExtKind::OffsetDateTime => "offset-datetime",
+                ExtKind::LocalDateTime => "local-datetime",
+                ExtKind::LocalDate => "local-date",
+                ExtKind::LocalTime => "local-time",
+                ExtKind::EnumLiteral => "enum-literal",
+                ExtKind::CharLiteral => "char-literal",
+                ExtKind::NumberSpecial => "number-special",
+                // `ExtKind` is `#[non_exhaustive]`; see `extended_text_fits`.
+                _ => "extended",
+            },
+        })
     }
 }
 
@@ -281,6 +354,18 @@ impl<C> Schema<C> {
     pub fn rule_for(&self, path: &[Seg]) -> Option<&FieldRule<C>> {
         self.rules.iter().find(|r| r.at.matches(path))
     }
+
+    /// Every rule whose pattern matches `path`, in precedence order — the
+    /// first is what [`Schema::rule_for`] returns, and the rest are the rules
+    /// it shadows. That is what makes precedence *visible*: a schema composed
+    /// from several documents decides it by include order, and this is how a
+    /// tool shows a person which later rule a path would otherwise have hit.
+    pub fn rules_for<'s, 'p: 's>(
+        &'s self,
+        path: &'p [Seg],
+    ) -> impl Iterator<Item = &'s FieldRule<C>> + 's {
+        self.rules.iter().filter(move |r| r.at.matches(path))
+    }
 }
 
 #[cfg(test)]
@@ -425,6 +510,104 @@ mod tests {
                 .is_some()
         );
         assert!(schema.rule_for(&[Seg::Key("missing".into())]).is_none());
+    }
+
+    #[test]
+    fn every_value_has_a_type_and_uint_is_an_int() {
+        assert_eq!(FieldType::of(&Value::Null), FieldType::Null);
+        assert_eq!(FieldType::of(&Value::Bool(true)), FieldType::Bool);
+        assert_eq!(FieldType::of(&Value::Int(1)), FieldType::Int);
+        assert_eq!(FieldType::of(&Value::Uint(u64::MAX)), FieldType::Int);
+        assert_eq!(FieldType::of(&Value::Float(1.5)), FieldType::Float);
+        assert_eq!(FieldType::of(&Value::Str("x".into())), FieldType::Str);
+        assert_eq!(
+            FieldType::of(&Value::Extended {
+                kind: ExtKind::LocalDate,
+                text: "1979-05-27".into()
+            }),
+            FieldType::Extended(ExtKind::LocalDate)
+        );
+        assert_eq!(FieldType::of(&Value::Seq(vec![])), FieldType::Seq);
+        assert_eq!(FieldType::of(&Value::Map(vec![])), FieldType::Map);
+    }
+
+    #[test]
+    fn admits_is_equality_plus_the_two_widenings() {
+        let text = Value::Str("123".into());
+        assert!(FieldType::Str.admits(&text));
+        // A reference is stored as text, so a string fits a `Ref` field...
+        assert!(FieldType::Ref.admits(&text));
+        // ...but not the other way round: `Ref` is never what a value *has*.
+        assert!(!FieldType::Int.admits(&text));
+
+        // A float field admits an integer, whichever way fig spelled it.
+        assert!(FieldType::Float.admits(&Value::Int(3)));
+        assert!(FieldType::Float.admits(&Value::Uint(u64::MAX)));
+        assert!(FieldType::Float.admits(&Value::Float(0.5)));
+        // An int field does not admit a float.
+        assert!(!FieldType::Int.admits(&Value::Float(3.0)));
+        assert!(FieldType::Int.admits(&Value::Uint(u64::MAX)));
+
+        assert!(FieldType::Null.admits(&Value::Null));
+        assert!(!FieldType::Str.admits(&Value::Null));
+        assert!(FieldType::Bool.admits(&Value::Bool(false)));
+        assert!(FieldType::Seq.admits(&Value::Seq(vec![])));
+        assert!(!FieldType::Seq.admits(&Value::Map(vec![])));
+        assert!(FieldType::Map.admits(&Value::Map(vec![])));
+    }
+
+    #[test]
+    fn an_extended_field_admits_only_its_own_kind() {
+        let date = Value::Extended {
+            kind: ExtKind::LocalDate,
+            text: "1979-05-27".into(),
+        };
+        assert!(FieldType::Extended(ExtKind::LocalDate).admits(&date));
+        assert!(!FieldType::Extended(ExtKind::LocalTime).admits(&date));
+        // A format without the literal parses the same text as a string, and
+        // that is a mismatch: the field asked for a date and got text.
+        assert!(!FieldType::Extended(ExtKind::LocalDate).admits(&Value::Str("1979-05-27".into())));
+        assert!(!FieldType::Str.admits(&date));
+    }
+
+    #[test]
+    fn a_type_displays_as_the_format_spells_it() {
+        assert_eq!(FieldType::Int.to_string(), "int");
+        assert_eq!(FieldType::Str.to_string(), "str");
+        assert_eq!(FieldType::Seq.to_string(), "seq");
+        assert_eq!(
+            FieldType::Extended(ExtKind::LocalDate).to_string(),
+            "local-date"
+        );
+    }
+
+    #[test]
+    fn rules_for_lists_every_match_with_rule_for_first() {
+        let schema = Schema::new(vec![
+            FieldRule::new(PathPat(vec![
+                crate::SegPat::Key("meta".into()),
+                crate::SegPat::Key("id".into()),
+            ]))
+            .ty(FieldType::Int)
+            .constraint_opt(None::<AlwaysReject>),
+            FieldRule::new(PathPat::key("title")).ty(FieldType::Str),
+            FieldRule::new(PathPat::subtree_of("meta")).ty(FieldType::Str),
+            FieldRule::new(PathPat(vec![crate::SegPat::AnyDepth])).ty(FieldType::Null),
+        ]);
+        let id = [Seg::Key("meta".into()), Seg::Key("id".into())];
+        let matched: Vec<_> = schema.rules_for(&id).map(|r| r.ty).collect();
+        // The winner, then what it shadows, in declaration order; `title` is
+        // not among them.
+        assert_eq!(
+            matched,
+            vec![
+                Some(FieldType::Int),
+                Some(FieldType::Str),
+                Some(FieldType::Null)
+            ]
+        );
+        assert_eq!(schema.rule_for(&id).unwrap().ty, matched[0]);
+        assert_eq!(schema.rules_for(&[Seg::Key("nothing".into())]).count(), 1);
     }
 
     #[test]
