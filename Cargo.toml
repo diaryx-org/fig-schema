@@ -43,4 +43,4 @@ path = "src/main.rs"
 [dependencies]
 # The one dependency, and the reason the schema document format can be a fig
 # document without adding a second: the parser is already here.
-fig = "3.3"
+fig = "4"
