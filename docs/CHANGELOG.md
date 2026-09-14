@@ -40,6 +40,12 @@ elsewhere:
 
 <!-- git-cliff:begin — generated; edits here are overwritten -->
 
+_No commits since the last tag._
+
+<!-- git-cliff:end -->
+
+## v0.3.0 — 2026-09-14
+
 ### Breaking
 
 - **deps** — move to fig 4 ([`6dee8bd`](https://github.com/diaryx-org/fig-schema/commit/6dee8bdf8153f845d59d179cac10ff1eedefc567))
@@ -57,7 +63,6 @@ elsewhere:
 pinned to fig 3.x resolves two copies of fig, and its `fig::Value` stops
 being fig-schema's `Value`; move the consumer's own pin to 4 alongside.
 
-<!-- git-cliff:end -->
 ## v0.2.1 — 2026-08-20
 
 ### Added
