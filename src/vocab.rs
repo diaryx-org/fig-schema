@@ -165,13 +165,27 @@ impl VocabularyDoc {
 /// Key lookup is [`Value::get`], so a duplicated key resolves last-wins, the
 /// same way fig itself reads one. A duplicated *term* is not a lookup and
 /// yields two [`Term`]s with the same value, in declaration order.
+///
+/// A term's `tint` is read, by [`Tint::from_name`]; a spelling that names no
+/// tint is no tint, which [`lint_vocabulary`](crate::lint_vocabulary) notes.
 pub fn parse_vocabulary(value: &Value) -> Option<VocabularyDoc> {
     let marker = value.get("vocabulary")?;
     let field = marker.get("field")?.as_str()?.to_string();
     let closed = marker.get("values").and_then(Value::as_str) == Some("closed");
+    Some(VocabularyDoc {
+        field,
+        closed,
+        terms: parse_terms(value),
+    })
+}
 
+/// The `terms:` mapping of `container` as [`Term`]s — the half of
+/// [`parse_vocabulary`] a vocabulary written inline in a schema rule shares
+/// with a vocabulary document. No `terms`, or one that is not a mapping, is no
+/// terms.
+pub(crate) fn parse_terms(container: &Value) -> Vec<Term> {
     let mut terms = Vec::new();
-    if let Some(entries) = value.get("terms").and_then(Value::as_mapping) {
+    if let Some(entries) = container.get("terms").and_then(Value::as_mapping) {
         for (key, spec) in entries {
             let Some(name) = key.as_str() else { continue };
             // A bare `term:` (null/scalar spec) has no keys to read, so every
@@ -188,15 +202,14 @@ pub fn parse_vocabulary(value: &Value) -> Option<VocabularyDoc> {
                     .and_then(Value::as_str)
                     .map(str::to_string),
                 retired: spec.get("retired").and_then(Value::as_bool) == Some(true),
-                tint: None,
+                tint: spec
+                    .get("tint")
+                    .and_then(Value::as_str)
+                    .and_then(Tint::from_name),
             });
         }
     }
-    Some(VocabularyDoc {
-        field,
-        closed,
-        terms,
-    })
+    terms
 }
 
 /// Why a value failed to validate.
@@ -744,5 +757,17 @@ mod tests {
     #[test]
     fn a_document_without_the_marker_is_not_a_vocabulary() {
         assert!(parse("title: Notes\n").is_none());
+    }
+
+    #[test]
+    fn a_terms_tint_is_read_and_an_unknown_spelling_is_none() {
+        let v = parse(
+            "vocabulary:\n  field: audience\nterms:\n  public:\n    tint: positive\n\
+             \x20 odd:\n    tint: green\n  plain: {}\n",
+        )
+        .expect("a vocabulary document");
+        assert_eq!(v.terms[0].tint, Some(Tint::Positive));
+        assert_eq!(v.terms[1].tint, None);
+        assert_eq!(v.terms[2].tint, None);
     }
 }

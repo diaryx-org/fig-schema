@@ -90,6 +90,47 @@ pub enum Icon {
     Other(String),
 }
 
+impl Icon {
+    /// The icon a schema document's `icon` key names. Never fails: a name that
+    /// is not one of the eight known is [`Icon::Other`], because a frontend's
+    /// own symbol name is not a typo — a presenter fails open.
+    ///
+    /// ```
+    /// use fig_schema::Icon;
+    ///
+    /// assert_eq!(Icon::from_name("globe"), Icon::Globe);
+    /// assert_eq!(Icon::from_name("sparkles"), Icon::Other("sparkles".into()));
+    /// ```
+    pub fn from_name(name: &str) -> Icon {
+        match name {
+            "link" => Icon::Link,
+            "enum" => Icon::Enum,
+            "toggle" => Icon::Toggle,
+            "lock" => Icon::Lock,
+            "globe" => Icon::Globe,
+            "clock" => Icon::Clock,
+            "tag" => Icon::Tag,
+            "text" => Icon::Text,
+            other => Icon::Other(other.to_owned()),
+        }
+    }
+
+    /// The name [`Icon::from_name`] reads this icon back from.
+    pub fn name(&self) -> &str {
+        match self {
+            Icon::Link => "link",
+            Icon::Enum => "enum",
+            Icon::Toggle => "toggle",
+            Icon::Lock => "lock",
+            Icon::Globe => "globe",
+            Icon::Clock => "clock",
+            Icon::Tag => "tag",
+            Icon::Text => "text",
+            Icon::Other(name) => name,
+        }
+    }
+}
+
 /// A semantic tint hint. Frontends map to theme-adaptive colours.
 ///
 /// `#[non_exhaustive]`: a palette grows the same way an icon set does, so a
@@ -130,4 +171,56 @@ impl Tint {
         Tint::Warning,
         Tint::Danger,
     ];
+
+    /// The tint a schema document's `tint` key — on a rule, or on a term —
+    /// names, or `None` for a spelling the crate cannot map. The loader drops
+    /// that `None` and `lint` notes it: a tint no frontend can name is one no
+    /// frontend can draw, and a presenter fails open.
+    ///
+    /// ```
+    /// use fig_schema::Tint;
+    ///
+    /// assert_eq!(Tint::from_name("positive"), Some(Tint::Positive));
+    /// assert_eq!(Tint::from_name("green"), None);
+    /// ```
+    pub fn from_name(name: &str) -> Option<Tint> {
+        Tint::ALL.iter().copied().find(|tint| tint.name() == name)
+    }
+
+    /// The name [`Tint::from_name`] reads this tint back from.
+    pub fn name(self) -> &'static str {
+        match self {
+            Tint::Accent => "accent",
+            Tint::Neutral => "neutral",
+            Tint::Positive => "positive",
+            Tint::Warning => "warning",
+            Tint::Danger => "danger",
+        }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn every_tint_and_icon_round_trips_through_its_name() {
+        for tint in Tint::ALL {
+            assert_eq!(Tint::from_name(tint.name()), Some(*tint));
+        }
+        assert_eq!(Tint::from_name("Positive"), None);
+        for icon in [
+            Icon::Link,
+            Icon::Enum,
+            Icon::Toggle,
+            Icon::Lock,
+            Icon::Globe,
+            Icon::Clock,
+            Icon::Tag,
+            Icon::Text,
+            Icon::Other("sparkles".into()),
+        ] {
+            assert_eq!(Icon::from_name(icon.name()), icon);
+        }
+    }
 }

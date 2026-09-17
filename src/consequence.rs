@@ -30,6 +30,39 @@ pub enum Severity {
     ConfirmExplicitly,
 }
 
+impl Severity {
+    /// The severity a schema document's `severity` key names — `notice`,
+    /// `confirm`, `confirm_explicitly` — or `None` for any other spelling. The
+    /// loader treats that `None` as an error rather than a default, for the
+    /// reason this enum is exhaustive: under-warning about the change the
+    /// author warned about hardest is the one failure the type exists to
+    /// prevent.
+    ///
+    /// ```
+    /// use fig_schema::Severity;
+    ///
+    /// assert_eq!(Severity::from_name("confirm"), Some(Severity::Confirm));
+    /// assert_eq!(Severity::from_name("warn"), None);
+    /// ```
+    pub fn from_name(name: &str) -> Option<Severity> {
+        match name {
+            "notice" => Some(Severity::Notice),
+            "confirm" => Some(Severity::Confirm),
+            "confirm_explicitly" => Some(Severity::ConfirmExplicitly),
+            _ => None,
+        }
+    }
+
+    /// The name [`Severity::from_name`] reads this severity back from.
+    pub fn name(self) -> &'static str {
+        match self {
+            Severity::Notice => "notice",
+            Severity::Confirm => "confirm",
+            Severity::ConfirmExplicitly => "confirm_explicitly",
+        }
+    }
+}
+
 /// A cost of changing a field, declared on the rule that governs it.
 ///
 /// A different fact from [`Presentation`](crate::Presentation)'s
@@ -320,5 +353,17 @@ mod tests {
     fn severity_orders_ascending_so_max_picks_the_loudest() {
         assert!(Severity::Notice < Severity::Confirm);
         assert!(Severity::Confirm < Severity::ConfirmExplicitly);
+    }
+
+    #[test]
+    fn every_severity_round_trips_through_its_name() {
+        for severity in [
+            Severity::Notice,
+            Severity::Confirm,
+            Severity::ConfirmExplicitly,
+        ] {
+            assert_eq!(Severity::from_name(severity.name()), Some(severity));
+        }
+        assert_eq!(Severity::from_name("Confirm"), None);
     }
 }

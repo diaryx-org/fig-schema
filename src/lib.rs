@@ -12,14 +12,27 @@
 //! are generic over that type, so the path-matching and commit-time
 //! validation plumbing is written once, here, and reused by every embedder.
 //!
+//! A schema is also **a document**. [`load_schema`] reads one written to the
+//! schema document format — `docs/schema-format.md`, a fig document in any of
+//! fig's languages, composed from others by `include` and from vocabulary
+//! documents by `constraint.from` — into a [`Schema<Constraint>`], where
+//! [`Constraint`] is this crate's own type: a vocabulary, or an
+//! [`Other`](Constraint::Other) kind it does not know, which validates to
+//! *unchecked* rather than pretending. An embedder maps that into its own
+//! constraint type with [`Schema::map_constraints`] and keeps the seam; the
+//! `fig-schema` binary checks documents against it with no embedder at all.
+//!
 //! What's genuinely reusable, and lives here as concrete types rather than
 //! being left to the embedder:
 //!
 //! - [`PathPat`] / [`SegPat`] — pattern-matching a fig path, including "every
 //!   item of this list" ([`SegPat::EachItem`]) and "this subtree"
-//!   ([`SegPat::AnyDepth`]).
-//! - [`FieldType`] — the expected type, and type-directed coercion of an edit
-//!   buffer ([`FieldType::coerce`]).
+//!   ([`SegPat::AnyDepth`]); [`PathPat::parse`] reads one from the format's
+//!   grammar (`audience[]`, `meta.**`) and [`render_path`] is its inverse.
+//! - [`FieldType`] — the expected type, type-directed coercion of an edit
+//!   buffer ([`FieldType::coerce`]), whether a parsed value already has the
+//!   type ([`FieldType::admits`]), and the name the format spells it by
+//!   ([`FieldType::from_name`]).
 //! - [`Term`] / [`Cardinality`] / [`validate_enum`] — a controlled vocabulary
 //!   and the logic to check a value against one (closed-vocabulary rejection,
 //!   open-vocabulary near-miss warnings). Cardinality (one vs. many) is pure
@@ -33,9 +46,14 @@
 //!   it. [`parse_vocabulary`] is permissive by design (a key it cannot read is
 //!   a key it skips), which leaves a set of ways a document can say something
 //!   nothing acts on — `values: cloesd` loading as an *open* vocabulary being
-//!   the one with teeth. This is where an author is told. The `fig-schema`
-//!   binary in this crate is a front end for it, reachable as `fig schema lint`
-//!   wherever fig is installed.
+//!   the one with teeth. This is where an author is told. [`load_schema`]
+//!   reports the same kind of finding over a schema document, and the
+//!   `fig-schema` binary in this crate is a front end for both, reachable as
+//!   `fig schema lint` wherever fig is installed.
+//! - [`load_schema`] / [`Loaded`] / [`LoadError`] — a [`Schema`] from a
+//!   document, with an [`Origin`] on every rule saying which document and
+//!   which entry it was read from, so the precedence include order decided is
+//!   visible rather than inferred.
 //! - [`Presentation`] / [`Icon`] / [`Tint`] — renderer-neutral display hints,
 //!   carried on every rule but never interpreted here.
 //! - [`Consequence`] / [`Severity`] — what changing a field *costs*, so a host
@@ -52,7 +70,9 @@
 //!   against the rule that governs it, its shape against the rule's type
 //!   ([`FieldType::admits`]) and its value against the rule's constraint.
 //!   What `fig check` does not answer: not whether a file parses, but whether
-//!   what it parsed is valid.
+//!   what it parsed is valid. `fig-schema check` is this over a file and a
+//!   discovered schema; `explain` and `complete` are [`Schema::rules_for`]
+//!   and a rule's terms, rendered.
 //!
 //! The public structs are `#[non_exhaustive]`, so they are built from a
 //! constructor plus chainable setters ([`FieldRule::new`], [`Term::value`],
@@ -115,15 +135,17 @@ mod check;
 mod consequence;
 mod field;
 mod lint;
+mod load;
 mod path;
 mod present;
 mod vocab;
 
 pub use check::{Verdict, VerdictKind};
 pub use consequence::{Consequence, Severity, guards_without_terms};
-pub use field::{FieldRule, FieldType, Schema};
+pub use field::{FieldRule, FieldType, Origin, Schema};
 pub use lint::{Finding, FindingKind, lint_vocabulary};
-pub use path::{PathPat, Seg, SegPat, render_path};
+pub use load::{Constraint, LoadError, LoadErrorKind, Loaded, load_schema};
+pub use path::{PathPat, PatternError, Seg, SegPat, render_path, value_at};
 pub use present::{Icon, Presentation, Tint};
 pub use vocab::{
     Cardinality, Issue, IssueKind, Term, Validate, Validation, VocabularyDoc, parse_vocabulary,

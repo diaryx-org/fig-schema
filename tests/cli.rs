@@ -94,13 +94,13 @@ fn a_misspelled_values_fails_the_run_and_says_the_vocabulary_is_open() {
 
 #[test]
 fn a_note_alone_is_reported_and_still_exits_0_until_strict() {
-    // A `tint:` is dropped when the document is loaded, which is worth saying
-    // and is not worth failing somebody's commit over.
+    // A `tint:` nobody can map is dropped when the document is loaded, which
+    // is worth saying and is not worth failing somebody's commit over.
     let path = file(
         "note",
         "audience.yaml",
         "vocabulary:\n  field: a\n  values: closed\n\
-         terms:\n  public:\n    tint: positive\n",
+         terms:\n  public:\n    tint: mauve\n",
     );
     let output = lint(&path, &[]);
     assert_eq!(code(&output), 0, "{}", stdout(&output));

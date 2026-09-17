@@ -11,6 +11,14 @@
 //! document says something and nothing acts on it, and the author is never told.
 //! This module is where they are told.
 //!
+//! The same division of labour extends to a schema document. Whatever
+//! [`load_schema`](crate::load_schema) reads permissively — a key in a rule
+//! nothing reads, a `tint` nothing maps, a vocabulary `field` that disagrees
+//! with the rule's `at` — it reports as a [`Finding`] of one of the kinds
+//! below, in the same list a vocabulary document's findings go in, with
+//! [`Finding::document`] saying which document. What it cannot read at all is
+//! a [`LoadError`](crate::LoadError) instead, because a validator fails closed.
+//!
 //! # Errors and notes
 //!
 //! A finding is an **error** when it changes what validation *does*, and a
@@ -39,8 +47,11 @@
 
 use std::collections::BTreeMap;
 use std::fmt;
+use std::path::PathBuf;
 
 use fig::Value;
+
+use crate::present::Tint;
 
 /// One thing the lint has to say about a vocabulary document.
 ///
@@ -60,6 +71,11 @@ pub struct Finding {
     /// nothing downstream of a parse knows which line a key came from. It is
     /// also how fig's own `Warning` addresses a node, so the two agree.
     pub at: String,
+    /// Which document, when the finding is one of several documents' —
+    /// [`load_schema`](crate::load_schema) follows includes and `from`
+    /// references, and a finding in one of those names it here. `None` from
+    /// [`lint_vocabulary`], which judges the one document it was given.
+    pub document: Option<PathBuf>,
 }
 
 impl Finding {
@@ -81,11 +97,16 @@ impl Finding {
             | FindingKind::NothingOffered => true,
             FindingKind::DuplicateTerm { disagree_retired } => *disagree_retired,
             FindingKind::NoTerms { closed } => *closed,
+            FindingKind::GuardWithoutTerm { .. } => true,
             FindingKind::UnknownKey { .. }
             | FindingKind::TintNotRead
+            | FindingKind::TintUnreadable { .. }
             | FindingKind::NotAString { .. }
             | FindingKind::TermSpecIgnored
-            | FindingKind::CaseOnlyDuplicate { .. } => false,
+            | FindingKind::CaseOnlyDuplicate { .. }
+            | FindingKind::FieldDisagrees { .. }
+            | FindingKind::IncludedTwice
+            | FindingKind::Shadowed { .. } => false,
         }
     }
 }
@@ -152,11 +173,20 @@ pub enum FindingKind {
         /// The key as written.
         key: String,
     },
-    /// A term declares a `tint:`, which [`parse_vocabulary`](crate::parse_vocabulary)
-    /// does not read yet — [`Term::tint`](crate::Term) is only ever set in
-    /// Rust, so the term renders untinted. See [`Tint::ALL`](crate::Tint::ALL),
-    /// which exists for the release that closes this.
+    /// A term declared a `tint:` when [`parse_vocabulary`](crate::parse_vocabulary)
+    /// did not read one. **No longer produced**: the parser reads the key
+    /// since the release that shipped the schema document loader, and a
+    /// spelling it cannot map is [`TintUnreadable`](FindingKind::TintUnreadable).
+    /// The variant stays because removing one is a break for every `match`
+    /// downstream.
     TintNotRead,
+    /// A `tint:` — on a term, or on a rule — spelled as none of `accent`,
+    /// `neutral`, `positive`, `warning`, `danger`. A note: the tint is dropped
+    /// and the field or term draws untinted, which is a presenter failing open.
+    TintUnreadable {
+        /// How it was written.
+        spelling: String,
+    },
     /// A term's `label:` or `description:` that is not a string, which the
     /// parser drops.
     NotAString {
@@ -174,6 +204,33 @@ pub enum FindingKind {
     CaseOnlyDuplicate {
         /// The term this one collides with.
         other: String,
+    },
+    /// A rule's vocabulary was loaded `from` a document whose `field` names a
+    /// different path from the rule's `at`. The rule's `at` wins — that is
+    /// what `from` means — so this is a note: the document's own `field` is
+    /// read by nothing here.
+    FieldDisagrees {
+        /// The `field` the vocabulary document declares.
+        field: String,
+    },
+    /// An `on_change.when` naming a value the rule's vocabulary has no term
+    /// for. An error, and the reason [`guards_without_terms`](crate::guards_without_terms)
+    /// exists: the guard never fires, and the user commits the change the
+    /// author warned about hardest with no warning at all.
+    GuardWithoutTerm {
+        /// The value the guard names.
+        value: String,
+    },
+    /// An `include` of a document this schema already includes. Both copies
+    /// are spliced, and the second shadows nothing — so a note.
+    IncludedTwice,
+    /// A rule every one of whose paths an earlier rule also matches, so it can
+    /// never govern anything. A note, and the one finding that needs the whole
+    /// loaded schema rather than one document: `**` written before anything is
+    /// the usual way to get one.
+    Shadowed {
+        /// The rule that shadows it, by its origin.
+        by: String,
     },
 }
 
@@ -225,6 +282,11 @@ impl fmt::Display for Finding {
                 "`tint` is not read when a vocabulary is loaded from a document, \
                  so this term renders untinted",
             ),
+            FindingKind::TintUnreadable { spelling } => write!(
+                f,
+                "`tint: {spelling}` names no tint this crate knows (accent, neutral, \
+                 positive, warning, danger), so it is dropped",
+            ),
             FindingKind::NotAString { key } => {
                 write!(f, "`{key}` is not text, so it is dropped")
             }
@@ -237,6 +299,25 @@ impl fmt::Display for Finding {
                 "differs from `{other}` only by case; both are distinct values, \
                  and a reader cannot tell them apart",
             ),
+            FindingKind::FieldDisagrees { field } => write!(
+                f,
+                "this vocabulary document declares `field: {field}`, which is not \
+                 the rule's `at`; the rule's wins and the document's is read by nothing",
+            ),
+            FindingKind::GuardWithoutTerm { value } => write!(
+                f,
+                "`when: {value}` names no term of this rule's vocabulary, so the \
+                 consequence never fires",
+            ),
+            FindingKind::IncludedTwice => f.write_str(
+                "this document is already included, so this copy of its rules \
+                 shadows nothing",
+            ),
+            FindingKind::Shadowed { by } => write!(
+                f,
+                "every path this rule matches is matched by the earlier rule at \
+                 {by}, so it can never govern anything",
+            ),
         }
     }
 }
@@ -244,11 +325,7 @@ impl fmt::Display for Finding {
 /// The keys `vocabulary` is read for.
 const VOCABULARY_KEYS: &[&str] = &["field", "values"];
 
-/// The keys a term's spec is read for. `tint` is in the list because a document
-/// declaring one is not making a typo — it is writing the key
-/// [`Term::tint`](crate::Term) exists for, which the parser does not read yet.
-/// It gets [`FindingKind::TintNotRead`] rather than
-/// [`FindingKind::UnknownKey`].
+/// The keys a term's spec is read for.
 const TERM_KEYS: &[&str] = &["label", "description", "retired", "tint"];
 
 /// Lint a vocabulary document, given its top-level value. An empty result is a
@@ -292,9 +369,21 @@ pub fn lint_vocabulary(value: &Value) -> Vec<Finding> {
         findings.push(finding(FindingKind::FieldEmpty, "vocabulary.field"));
     }
 
-    // The parse is `== Some("closed")`, so every other spelling — including a
-    // missing key — is open. A *missing* one is legitimate and says nothing; a
-    // present one the parser does not recognize is a typo with teeth.
+    let closed = lint_values(marker, "vocabulary", &mut findings);
+    unknown_keys(marker, VOCABULARY_KEYS, "vocabulary", &mut findings);
+
+    lint_terms(value, closed, "", &mut findings);
+    findings
+}
+
+/// The `values` key of `marker`, judged, and what the parser reads it as.
+///
+/// The parse is `== Some("closed")`, so every other spelling — including a
+/// missing key — is open. A *missing* one is legitimate and says nothing; a
+/// present one the parser does not recognize is a typo with teeth. `at` is
+/// the path of `marker` — `vocabulary` in a vocabulary document,
+/// `rules[2].constraint` for a vocabulary written inline in a rule.
+pub(crate) fn lint_values(marker: &Value, at: &str, findings: &mut Vec<Finding>) -> bool {
     let closed = marker.get("values").and_then(Value::as_str) == Some("closed");
     if let Some(values) = marker.get("values") {
         match values.as_str() {
@@ -303,7 +392,7 @@ pub fn lint_vocabulary(value: &Value) -> Vec<Finding> {
                 FindingKind::ValuesUnreadable {
                     spelling: other.to_owned(),
                 },
-                "vocabulary.values",
+                format!("{at}.values"),
             )),
             // Not text at all (`values: true`, `values: [closed]`). Same
             // consequence, so the same finding, spelled the way fig prints it.
@@ -311,25 +400,30 @@ pub fn lint_vocabulary(value: &Value) -> Vec<Finding> {
                 FindingKind::ValuesUnreadable {
                     spelling: sketch(values),
                 },
-                "vocabulary.values",
+                format!("{at}.values"),
             )),
         }
     }
-    unknown_keys(marker, VOCABULARY_KEYS, "vocabulary", &mut findings);
-
-    lint_terms(value, closed, &mut findings);
-    findings
+    closed
 }
 
 /// The `terms:` half: every entry, and then the questions that need the whole
-/// set at once (duplicates, and whether anything is left on offer).
-fn lint_terms(value: &Value, closed: bool, findings: &mut Vec<Finding>) {
+/// set at once (duplicates, and whether anything is left on offer). `prefix`
+/// is the path of the mapping holding `terms` — empty for a vocabulary
+/// document, `rules[2].constraint.` for a vocabulary inline in a rule.
+pub(crate) fn lint_terms(value: &Value, closed: bool, prefix: &str, findings: &mut Vec<Finding>) {
     let Some(entries) = value.get("terms").and_then(Value::as_mapping) else {
-        findings.push(finding(FindingKind::NoTerms { closed }, "terms"));
+        findings.push(finding(
+            FindingKind::NoTerms { closed },
+            format!("{prefix}terms"),
+        ));
         return;
     };
     if entries.is_empty() {
-        findings.push(finding(FindingKind::NoTerms { closed }, "terms"));
+        findings.push(finding(
+            FindingKind::NoTerms { closed },
+            format!("{prefix}terms"),
+        ));
         return;
     }
 
@@ -340,10 +434,13 @@ fn lint_terms(value: &Value, closed: bool, findings: &mut Vec<Finding>) {
 
     for (key, spec) in entries {
         let Some(name) = key.as_str() else {
-            findings.push(finding(FindingKind::TermKeyNotAString, "terms"));
+            findings.push(finding(
+                FindingKind::TermKeyNotAString,
+                format!("{prefix}terms"),
+            ));
             continue;
         };
-        let at = format!("terms.{name}");
+        let at = format!("{prefix}terms.{name}");
 
         // A bare `public:` (null) and an empty `public: {}` are both documented
         // spellings of "a live term with no metadata". Anything else that is
@@ -384,8 +481,20 @@ fn lint_terms(value: &Value, closed: bool, findings: &mut Vec<Finding>) {
             },
         };
 
-        if spec.get("tint").is_some() {
-            findings.push(finding(FindingKind::TintNotRead, format!("{at}.tint")));
+        // Read since the loader shipped; what is left to say is a spelling
+        // the crate cannot map, which loads as no tint at all.
+        if let Some(tint) = spec.get("tint") {
+            let known = tint
+                .as_str()
+                .is_some_and(|name| Tint::from_name(name).is_some());
+            if !known {
+                findings.push(finding(
+                    FindingKind::TintUnreadable {
+                        spelling: sketch(tint),
+                    },
+                    format!("{at}.tint"),
+                ));
+            }
         }
         unknown_keys(spec, TERM_KEYS, &at, findings);
 
@@ -400,19 +509,22 @@ fn lint_terms(value: &Value, closed: bool, findings: &mut Vec<Finding>) {
         seen.push((name.to_owned(), retired));
     }
 
-    case_only_duplicates(&seen, findings);
+    case_only_duplicates(&seen, prefix, findings);
 
     // Only worth saying when there is something to be on offer: an empty
     // `terms:` already had its finding above, and reporting both would be the
     // same sentence twice.
     if closed && !seen.is_empty() && seen.iter().all(|(_, retired)| *retired) {
-        findings.push(finding(FindingKind::NothingOffered, "terms"));
+        findings.push(finding(
+            FindingKind::NothingOffered,
+            format!("{prefix}terms"),
+        ));
     }
 }
 
 /// Live terms that collide once case is folded away. Reported against the
 /// *later* of the pair, since that is the one a reader would be adding.
-fn case_only_duplicates(seen: &[(String, bool)], findings: &mut Vec<Finding>) {
+fn case_only_duplicates(seen: &[(String, bool)], prefix: &str, findings: &mut Vec<Finding>) {
     let mut folded: BTreeMap<String, &str> = BTreeMap::new();
     for (value, retired) in seen {
         if *retired {
@@ -427,7 +539,7 @@ fn case_only_duplicates(seen: &[(String, bool)], findings: &mut Vec<Finding>) {
                 FindingKind::CaseOnlyDuplicate {
                     other: (*first).to_owned(),
                 },
-                format!("terms.{value}"),
+                format!("{prefix}terms.{value}"),
             )),
             None => {
                 folded.insert(key, value);
@@ -442,7 +554,7 @@ fn case_only_duplicates(seen: &[(String, bool)], findings: &mut Vec<Finding>) {
 /// question is which keys are *present*, not what one of them resolves to — and
 /// a duplicated key is therefore reported once per copy, which is the honest
 /// answer for a document that spells it twice.
-fn unknown_keys(mapping: &Value, known: &[&str], at: &str, findings: &mut Vec<Finding>) {
+pub(crate) fn unknown_keys(mapping: &Value, known: &[&str], at: &str, findings: &mut Vec<Finding>) {
     let Some(entries) = mapping.as_mapping() else {
         return;
     };
@@ -459,17 +571,18 @@ fn unknown_keys(mapping: &Value, known: &[&str], at: &str, findings: &mut Vec<Fi
     }
 }
 
-fn finding(kind: FindingKind, at: impl Into<String>) -> Finding {
+pub(crate) fn finding(kind: FindingKind, at: impl Into<String>) -> Finding {
     Finding {
         kind,
         at: at.into(),
+        document: None,
     }
 }
 
 /// How to quote a non-text value back at its author. Serializing through fig
 /// would be exact but can fail and needs a format chosen; a finding only needs
 /// enough for the author to recognize the line they wrote.
-fn sketch(value: &Value) -> String {
+pub(crate) fn sketch(value: &Value) -> String {
     match value {
         Value::Null => "null".to_owned(),
         Value::Bool(b) => b.to_string(),
@@ -688,16 +801,35 @@ mod tests {
     }
 
     #[test]
-    fn a_declared_tint_is_reported_because_loading_one_drops_it() {
-        // `Term::tint` exists and `parse_vocabulary` does not read it, so the
-        // natural place to author a tint is the one place it has no effect.
+    fn a_tint_the_crate_cannot_name_is_dropped_and_said_so() {
+        // `tint` is read now, so a known spelling is silent...
+        assert_eq!(
+            lint(
+                "vocabulary:\n  field: a\n  values: closed\n\
+                 terms:\n  public:\n    tint: positive\n"
+            ),
+            Vec::new()
+        );
+        // ...and one the crate cannot map loads as no tint, a note.
         let findings = lint(
             "vocabulary:\n  field: a\n  values: closed\n\
-             terms:\n  public:\n    tint: positive\n",
+             terms:\n  public:\n    tint: green\n",
         );
-        assert_eq!(kinds_of(&findings), vec![FindingKind::TintNotRead]);
+        assert_eq!(
+            kinds_of(&findings),
+            vec![FindingKind::TintUnreadable {
+                spelling: "green".into()
+            }]
+        );
         assert_eq!(findings[0].at, "terms.public.tint");
         assert!(!findings[0].is_error());
+        // Not text at all is the same finding.
+        assert_eq!(
+            kinds("vocabulary:\n  field: a\nterms:\n  public:\n    tint: 3\n"),
+            vec![FindingKind::TintUnreadable {
+                spelling: "3".into()
+            }]
+        );
     }
 
     #[test]
@@ -774,9 +906,16 @@ mod tests {
             FindingKind::NothingOffered,
             FindingKind::UnknownKey { key: "x".into() },
             FindingKind::TintNotRead,
+            FindingKind::TintUnreadable {
+                spelling: "x".into(),
+            },
             FindingKind::NotAString { key: "x".into() },
             FindingKind::TermSpecIgnored,
             FindingKind::CaseOnlyDuplicate { other: "x".into() },
+            FindingKind::FieldDisagrees { field: "x".into() },
+            FindingKind::GuardWithoutTerm { value: "x".into() },
+            FindingKind::IncludedTwice,
+            FindingKind::Shadowed { by: "x".into() },
         ] {
             let rendered = finding(kind.clone(), "at").to_string();
             assert!(rendered.len() > 20, "{kind:?} renders only {rendered:?}");
