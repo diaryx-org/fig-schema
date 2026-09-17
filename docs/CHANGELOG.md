@@ -40,7 +40,62 @@ elsewhere:
 
 <!-- git-cliff:begin — generated; edits here are overwritten -->
 
-_No commits since the last tag._
+### Added
+
+- **load** — a schema read from a document — Constraint, Origin, load_schema, and lint over it ([`05f61ff`](https://github.com/diaryx-org/fig-schema/commit/05f61ff7094c52e2e5ab134183cb83af64f2a916))
+- **cli** — check, explain and complete, and lint over a schema document ([`2e9bb55`](https://github.com/diaryx-org/fig-schema/commit/2e9bb5568454f569dfb8367a1043e17d6e86d8af))
+
+### Changed
+
+- **field** — a type admits a list of its items, and a date admits a string shaped like one ([`995b82c`](https://github.com/diaryx-org/fig-schema/commit/995b82c9974dc4fb5110ac98412fc6e4dcf0d5e2))
+
+### Behavioural changes
+
+- `FieldType::admits` now admits a sequence whose
+  every item has the type, one level deep — `FieldType::Str` admits
+  `[public, family]` and the empty list — where it used to admit only a
+  value of exactly that type. `Schema::check` accordingly stops
+  reporting `expected str, found seq` at a list field whose items are
+  strings, and drops a container's type mismatch when an item under it
+  has already reported one.
+
+- `FieldType::Extended(kind)` now admits a
+  `Value::Str` shaped like a literal of that kind, so a `date` field
+  holding the string `1979-05-27` — every YAML or markdown document — is
+  no longer a type mismatch under `Schema::check`.
+
+- `FieldType`'s `Display` spells the extended kinds
+  `date`, `datetime`, `local-datetime`, `time`, `enum` and `char` in
+  place of `local-date`, `offset-datetime`, `local-datetime`,
+  `local-time`, `enum-literal` and `char-literal`. A `Verdict` message
+  for a date field reads `expected date, found str` where it read
+  `expected local-date, found str`.
+
+- `parse_vocabulary` now reads a term's `tint:` key —
+  `accent`, `neutral`, `positive`, `warning` or `danger` — into
+  `Term::tint`, where it used to leave it `None`. A vocabulary document
+  that already carries one starts rendering its terms tinted in any
+  frontend that maps `Term::tint`.
+
+- `lint_vocabulary` no longer reports `TintNotRead`
+  for a term's `tint:`. A known spelling is silent; a spelling that is
+  none of the five is the new `TintUnreadable` note. `fig-schema lint`
+  therefore stops printing a note on every tinted term, and `--strict`
+  stops failing on one.
+
+- `Finding` gained a `document: Option<PathBuf>`
+  field, `None` from `lint_vocabulary`. A downstream that reads
+  `Finding` by pattern needs `..`, which `#[non_exhaustive]` already
+  required.
+
+- `fig-schema lint` accepts a schema document, and a
+  document with neither a `schema` nor a `vocabulary` key is now
+  reported as being neither, where it used to be reported as not a
+  vocabulary document. Still exit 1; the sentence changed.
+
+- `fig-schema lint` on a markdown file with no
+  frontmatter says there is no *document* in it, where it said no
+  *vocabulary document*. Still exit 1.
 
 <!-- git-cliff:end -->
 
