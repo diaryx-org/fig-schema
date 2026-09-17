@@ -10,22 +10,33 @@ consumer defines its own constraint type and implements `Validate` on it, and
 `FieldRule`/`Schema` are generic over that type — so the path-matching and
 commit-time validation plumbing is written once, here, and reused everywhere.
 
+A schema is also a **document**. Written to
+[the schema document format](docs/schema-format.md) — a fig document in any of
+fig's languages, composed from others by `include` and from shared vocabulary
+documents by `constraint.from` — it is loaded by `load_schema`, checked
+against by the `fig-schema` binary, and mapped by an embedder into its own
+constraint type.
+
 ## What lives here
 
 | Type | Role |
 | --- | --- |
-| `PathPat` / `SegPat` | Match a fig path, including every item of a list (`EachItem`) and whole subtrees (`AnyDepth`) |
-| `FieldType` | The expected type: coercion of an edit buffer into it (`FieldType::coerce`), and whether a parsed value already has it (`FieldType::admits`) |
+| `PathPat` / `SegPat` | Match a fig path, including every item of a list (`EachItem`) and whole subtrees (`AnyDepth`); `PathPat::parse` reads the format's grammar (`audience[]`, `meta.**`) |
+| `FieldType` | The expected type: coercion of an edit buffer into it (`FieldType::coerce`), whether a parsed value already has it (`FieldType::admits`), and its name in the format (`FieldType::from_name`) |
 | `Term` / `Cardinality` / `validate_enum` | A controlled vocabulary and the logic to check a value against one |
 | `Validation` / `Issue` / `IssueKind` | Why a value failed, as data rather than prose — or that it was not checked at all (`IssueKind::Unchecked`) |
 | `Schema::check` / `Verdict` | A whole document against the schema: every node's shape against its rule's type, and its value against the rule's constraint |
 | `Presentation` / `Icon` / `Tint` | Renderer-neutral display hints, carried but never interpreted |
 | `Consequence` / `Severity` | What changing a field *costs*, so a host can warn before an expensive or irreversible edit |
 | `lint_vocabulary` / `Finding` | Judge a vocabulary document rather than read it — what it declares that nothing acts on |
+| `load_schema` / `Constraint` / `Origin` | A `Schema` read from a schema document, every rule saying which document and entry it came from; `Constraint` is the crate's own — a vocabulary, or an `Other` kind it cannot check |
 
-Deliberately *not* here: a `Constraint` enum. Whether a field's constraint is a
-controlled vocabulary, a reference into a workspace, a range, or a pattern is the
-embedder's call.
+The constraint seam is still the embedder's. `Constraint` exists so that a
+document can be loaded with no embedder behind it; an embedder maps a loaded
+`Schema<Constraint>` into a schema over its own type with
+`Schema::map_constraints`, reading the `Other` kinds it knows — a reference
+into a workspace, a range, a pattern — and keeping the rest as its own
+unchecked variant.
 
 ## Example
 
@@ -77,37 +88,56 @@ assert_eq!(rule.severity_of(&Value::Str("family".into())), None);
 
 ```
 cargo install fig-schema
-fig-schema lint vocab/audience.figl
+fig-schema check notes/*.md
+fig-schema explain note.md audience[1]
+fig-schema complete --bare note.md audience[0]
+fig-schema lint .fig-schema.figl
 ```
 
-One command so far. `lint` reads a vocabulary document and reports what it
-declares that nothing acts on. **Errors** are findings that change what
-validation does; **notes** are findings that change only what a reader sees, and
-`--strict` fails on those too. It exits 0 when every file is clean, 1 when a
-document has an error, and 2 when the command line itself is wrong — a script
-sweeping a directory can tell "fix this document" from "fix this invocation"
-without reading the message.
-
-The finding it exists for is `values: cloesd`. That parses, loads, and validates
-— as an **open** vocabulary, because `parse_vocabulary` asks only whether the
-spelling is exactly `closed`. Every value the author meant to forbid is then
-accepted, and nothing else in this crate can notice, because an open vocabulary
-that rejects nothing is indistinguishable from one that was meant to be open.
-
-Installed on PATH it is also `fig schema lint <file>`: fig hands an action it has
+Installed on PATH it is also `fig schema <command>`: fig hands an action it has
 no verb for to a `fig-<action>` program, passing every argument through
 untouched, so the two compose with no registration step anywhere.
 
-The commands with more reach — `check`, `explain`, `complete` — need a `Schema`,
-and a `Schema` is constructible only in Rust until the schema document format
-lands. The format is designed — [`docs/schema-format.md`](docs/schema-format.md)
-— and the loader is the open work; see `docs/tasks/`.
+**`check`** answers whether a document is *valid*, which `fig check` does not
+— that answers whether it parses. Every governed node is checked twice, its
+shape against its rule's type and its value against the rule's constraint, and
+the report has three headings: **errors** (a rejection, a type mismatch),
+**notes** (a warning — a retired term, an open vocabulary's near miss), and
+**unchecked** (a rule of a constraint kind this binary does not know). It exits
+0 when every file is valid, 1 when a file has an error, 2 when the command line
+is wrong, and **3** when nothing is invalid and not everything was checked —
+non-zero so a CI gate fails closed, distinct so a script can accept it
+deliberately. There is no `--allow-unchecked`; against a schema carrying
+reference constraints, prov's `check` is the tool that knows them, and exit 3 is
+how this one says so.
+
+The schema is found in exactly two ways. `--schema <file>`, repeatable in
+precedence order, is the whole schema when given. Otherwise the nearest
+`.fig-schema.<ext>` or `.config/fig-schema.<ext>`, walking up from the
+document's directory — one file, never a merge of every file on the way up, so
+a person reading it sees the whole precedence. Discovery order *is* rule
+precedence: `Schema::rule_for` returns the first match.
+
+**`explain`** answers "what governs this path": the value there and what its
+rule makes of it, the rule in full with the document and entry it was read
+from, and every later rule it *shadows* — the precedence include order decided,
+made visible. **`complete`** answers "what may I put here": a vocabulary's
+terms with labels, descriptions and the consequence choosing one would carry,
+live first and retired last; `--bare` is the shape a shell completer consumes,
+and never offers a retired term. Both exit 0 whenever the question was
+answered, "nothing governs this" included.
+
+**`lint`** reads a schema or vocabulary document, follows its includes, and
+reports what it declares that nothing acts on. The finding it exists for is
+`values: cloesd`, which loads as an **open** vocabulary that forbids nothing.
+Errors change what validation does; notes change only what a reader sees, and
+`--strict` fails on those too.
 
 Two limits worth knowing, both inherited rather than chosen:
 
 - **Findings carry a path, not a line and column.** fig hands back a value tree
   with no per-node spans, so nothing downstream of a parse knows which line a key
-  came from. `vocabulary.values` is the most any consumer of the parse can say.
+  came from. `audience[1]` is the most any consumer of the parse can say.
 - **It reads fewer formats than `fig check` does.** json, jsonc, json5, yaml,
   toml and figl, plus a markdown file's frontmatter or endmatter block. fig's own
   `check` also takes xml, ini, dotenv, properties, nestedtext and the canonical
@@ -127,6 +157,20 @@ what it shadows — so a tool can show the precedence rather than leave it infer
 be if there is one, and nothing says there must be one, so an empty document is
 valid. Nor does it report a node no rule governs: a schema governs what it
 names, and a check that fires on correct documents is one people stop running.
+
+**A type names the item, and a list of items has the type too.** `str` admits
+`public` and `[public, family]` alike, one level deep, because a field is
+declared once and written as a scalar or a list as the document pleases. A
+`date` also admits a string shaped like one, since YAML, JSON and markdown
+frontmatter have no date literal and every document in them would otherwise
+fail its own schema.
+
+**A validator fails closed; a presenter fails open.** The one rule that keeps
+the constraint seam intact across the document boundary. Anything the loader
+cannot read as a rule at all — an unknown `type`, an unknown `spec`, a missing
+`at` — is a `LoadError`, never a rule quietly weaker than the one written.
+Anything that changes only what a reader sees — a key nothing reads, a `tint`
+nothing maps — loads without it and is a `Finding`.
 
 **Unchecked is not wrong.** A constraint of a kind a validator does not know
 fails closed — `Validation::Reject` carrying `IssueKind::Unchecked(kind)` — so an

@@ -156,14 +156,15 @@ impl Tint {
     /// defines the vocabulary, and every value in a workspace is constructed by
     /// the embedder, so a new variant can only reach a `match` through a
     /// deliberate, reviewed change to the producer. [`Tint`] is the one where
-    /// that gate is contingent — [`parse_vocabulary`](crate::parse_vocabulary)
-    /// does not read a per-term `tint:` today, but [`Term::tint`](crate::Term)
-    /// exists precisely so a vocabulary can say `public` reads green, and the
-    /// natural place to author that is beside the term in the document. The day
-    /// the parser learns that key, a `Tint` arrives from *user data* and the
-    /// gate becomes "someone edited a file". This list has to already exist for
-    /// that change to turn consumer tests red instead of shipping a term that
-    /// silently renders untinted.
+    /// that gate is *not* the producer's: [`parse_vocabulary`](crate::parse_vocabulary)
+    /// reads a per-term `tint:`, and [`load_schema`](crate::load_schema) a
+    /// rule's, so a `Tint` arrives from *user data* and the gate is "someone
+    /// edited a file". This list existed before the parser learned the key,
+    /// so that the release which taught it would turn consumer tests red
+    /// instead of shipping a term that silently rendered untinted; a frontend
+    /// that asserts over it stays covered when a sixth tint is added here.
+    /// ([`Icon`] has an escape hatch instead: an unknown name is
+    /// [`Icon::Other`], which a frontend already has to draw.)
     pub const ALL: &'static [Tint] = &[
         Tint::Accent,
         Tint::Neutral,

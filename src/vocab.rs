@@ -4,10 +4,12 @@
 //! This module knows what a vocabulary *term* is and how to check a value
 //! against a list of them ([`validate_enum`]) — that's the whole of what's
 //! genuinely value-shape about a "constraint". It deliberately does not define
-//! a `Constraint` enum: whether a field's constraint is "a controlled
-//! vocabulary" or something else entirely (a reference into a workspace, a
-//! range, a pattern) is the embedder's call, expressed as its own type that
-//! implements [`Validate`]. See [`crate::FieldRule`].
+//! the constraint type a rule carries: whether a field's constraint is "a
+//! controlled vocabulary" or something else entirely (a reference into a
+//! workspace, a range, a pattern) is the embedder's call, expressed as its own
+//! type that implements [`Validate`]. See [`crate::FieldRule`]. (The crate's
+//! own [`Constraint`](crate::Constraint), in the loader, is what a *document*
+//! loads as, and an embedder maps it into its own type from there.)
 //!
 //! It also knows how to load a [`Term`] list from a document ([`parse_vocabulary`]):
 //! the `vocabulary: { field, values }` / `terms:` convention is common enough

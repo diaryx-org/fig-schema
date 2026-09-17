@@ -2,34 +2,46 @@
 title: A schema-aware command line
 author: adammharris
 created: 2026-09-02
-updated: 2026-09-10
-status: in-progress
+updated: 2026-09-17
+status: done
 part_of: '[tasks](/docs/tasks/tasks.md)'
 ---
 
 # A schema-aware command line
 
+## Status
+
+**Done.** The library half shipped in 0.3.0 (`d9eb3a3`); the three verbs are
+`2e9bb55`, on the loader in `05f61ff`. Everything under [Design](#design) is
+as built, with two details the design left open now settled: the discovery
+file is `.fig-schema.<ext>` *or* `.config/fig-schema.<ext>`, nearest wins and
+both in one directory is an error, as the format task confirmed; and a
+schema's origin prints relative to the working directory when it lies under
+it, so `explain` reads `.fig-schema.figl rules[0]` rather than the absolute
+path discovery walked. Findings still carry no line — see [Open
+questions](#open-questions), which is a task in `fig` if anyone wants it.
+
 **Done when** `fig-schema check <file>` answers whether a document is *valid*
 rather than whether it parses, and `explain` and `complete` answer the two
 questions a person asks next — what governs this path, and what may I put here.
 
-The binary itself exists: `fig-schema lint` ships, over vocabulary documents,
-and with it the argv handling, the exit codes, the format inference and the
-report shape that these three commands slot into. What is missing is the thing
-they all need and `lint` does not.
+The binary existed before the verbs did: `fig-schema lint` shipped first, over
+vocabulary documents, and with it the argv handling, the exit codes, the format
+inference and the report shape that these three commands slot into. What was
+missing was the thing they all need and `lint` did not.
 
-## Blocked on
+## Was blocked on
 
 [A schema document format](/docs/tasks/schema-document-format.md) — but only
-half of this task is. The three verbs each need a `Schema` read from disk, and
+half of this task was. The three verbs each need a `Schema` read from disk, and
 there is no way to write a command line around that: one that took its rules as
 Rust source would be a compiler, not a checker.
 
-The *engine* half is not blocked at all. Everything under [What the library
+The *engine* half was not blocked at all. Everything under [What the library
 gains](#what-the-library-gains) is written against a `Schema` however it was
-built, and is testable today with one built in Rust. It ships first, as a minor
-release, and the verbs follow the loader. An embedder gets a whole-document
-check out of the first half without waiting for the second.
+built, and was testable with one built in Rust. It shipped first, as 0.3.0,
+and the verbs followed the loader. An embedder got a whole-document check out
+of the first half without waiting for the second.
 
 ## Decisions already made, by `lint`
 
@@ -174,19 +186,20 @@ With a path, the answer to "what governs this":
 ```
 audience[1]  in note.md
   value: famly  — rejected: “famly” is not a known value, did you mean “family”?
-  rule: audience[]  from vocab/audience.figl, rule 1
+  rule: audience[]  from .fig-schema.figl rules[0]
     type: str
     constraint: vocabulary, closed, 4 terms (1 retired)
     title: Audience   icon: globe
     on change: when public — confirm — Anyone with the link will be able to read this.
-  shadows: meta.** from base.figl, rule 3
+  shadows: **  from base.figl rules[2]
 ```
 
 `shadows:` is the line the discovery question exists for. It lists every later
 rule that also matches the path, so a person can see the precedence that
 include order decided rather than infer it. It needs `Schema::rules_for`, below,
 and it needs each rule to know where it came from, which is the loader's to
-record.
+record — an `Origin`, printed as the document and the fig path of the entry,
+`rules[0]`, so it reads the way a `lint` finding about the same rule does.
 
 Without a path, the same answer for every node in the document, ungoverned
 nodes included, each on one line: what `check` prints only the failures of.
@@ -269,11 +282,10 @@ position it was read from.
 ### Order of work
 
 1. ~~The library half, one release: the four additions above, tested against
-   Rust-built schemas.~~ Done; awaiting a release, whose version is Adam's to
-   name — `Unchecked` is a new variant of a `#[non_exhaustive]` enum.
-2. The loader, in the format task.
-3. The three verbs, with `tests/cli.rs` asserting exit codes on the real binary
-   the way it does for `lint` — 3 among them.
+   Rust-built schemas.~~ Shipped in 0.3.0.
+2. ~~The loader, in the format task.~~ `05f61ff`.
+3. ~~The three verbs, with `tests/cli.rs` asserting exit codes on the real
+   binary the way it does for `lint` — 3 among them.~~ `2e9bb55`.
 
 ## Open questions
 
@@ -285,9 +297,9 @@ fig's own `Warning` does — by dotted path. Fine for a checker; the limit that
 matters is downstream, since a schema-aware language server cannot underline
 what it cannot locate. If spans are wanted, the task is in `fig`.
 
-**The discovery file's name.** `.fig-schema.<ext>` is proposed here, hidden
-the way `.editorconfig` is; prov's `prov.yaml` is the argument for a visible
-one. The format task confirms it beside the top-level key that names a schema.
+~~**The discovery file's name.**~~ Settled by the format task: `.fig-schema.<ext>`,
+hidden the way `.editorconfig` is, or `.config/fig-schema.<ext>`, the spelling
+prov and diaryx already use for a workspace's own configuration.
 
 ## Not in scope
 

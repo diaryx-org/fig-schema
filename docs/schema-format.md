@@ -2,8 +2,8 @@
 title: The schema document format
 author: adammharris
 created: 2026-09-10
-updated: 2026-09-10
-status: draft
+updated: 2026-09-17
+status: implemented
 part_of: '[fig-schema](/README.md)'
 ---
 
@@ -18,10 +18,9 @@ field, and what changing it costs. Loaded by this crate, it is the `Schema` that
 `complete` offers values from; an embedder loads the same document and maps the
 constraint kinds it knows into its own type.
 
-This is a **draft**: the format is designed here and not yet loaded by anything.
-[The task](/docs/tasks/schema-document-format.md) holds the argument for
-its shape and what was considered and not adopted; this document holds the
-format. When the loader ships, the status above changes and the task closes.
+This is **spec 1**, and `load_schema` reads it. [The
+task](/docs/tasks/schema-document-format.md) holds the argument for its shape
+and what was considered and not adopted; this document holds the format.
 
 ## A document
 
@@ -314,12 +313,13 @@ load error rather than a guess.
 written so far the two agree; one whose `field` contains `.` or `[` reads
 differently, and no such document exists in this organisation.
 
-**`tint` on a term is read.** `parse_vocabulary` has ignored it until now, and
-`lint` reports every one it meets as `TintNotRead`; the release that ships this
-loader is the release that teaches the parser that key, retires the finding, and
+**`tint` on a term is read.** `parse_vocabulary` ignored it before the loader
+shipped, and `lint` reported every one it met as `TintNotRead`; the release
+that ships the loader teaches the parser the key, retires that finding, and
 carries a `Behavioural-change:` trailer for it — `Tint::ALL` exists so a
 frontend's colour table is already asserted total before a tint arrives from a
-file.
+file. A spelling the crate cannot map loads as no tint and is the
+`TintUnreadable` note.
 
 ## Composition
 
@@ -418,27 +418,39 @@ extensions of one, is ambiguous and a load error: the reader must not choose.
 
 ## Loading
 
-What the crate gains to read this, stated so the format is designed with it
-rather than around it. Names are provisional until the code exists.
+What the crate has to read this, so the format is documented with its reader
+rather than apart from it.
 
-- **`Constraint`**, this crate's own constraint type: `Vocabulary { terms,
+- **[`Constraint`]**, this crate's own constraint type: `Vocabulary { terms,
   closed }` for the kind the format defines, and `Other { kind, spec: Value }`
   for any it does not. `Validate` on it runs `validate_enum` for the first and
   answers `Reject(Issue::unchecked(value, kind))` for the second. An embedder
-  loads a `Schema<Constraint>` and maps it into a `Schema<Its Own>`, keeping
-  `Other` kinds it also does not know as its own unchecked variant.
-- **`Origin`** on every `FieldRule`: which document, and which position in its
-  `rules`, a rule was read from — `Option`, and `None` for a rule built in
-  Rust. `explain`'s `shadows:` line reads it; it is how precedence that
-  include order decided becomes visible.
-- **`load_schema(path, read)`**, where `read` is the caller's way of turning a
-  path into a `Value` — the CLI's `source::load`, an embedder's own reader over
-  a workspace — so the library stays free of file I/O and testable with a map.
-  It returns the schema, the `lint` findings it noticed on the way, or a
-  `LoadError` naming the document and the reason.
-- **`parse_schema(&Value)`**, the pure half over one document: what it
-  declares, with includes and `from` paths left as paths. `load_schema` is this
-  plus resolution.
+  loads a `Schema<Constraint>` and maps it into a `Schema<Its Own>` with
+  `Schema::map_constraints`, keeping `Other` kinds it also does not know as its
+  own unchecked variant.
+- **[`Origin`]** on every `FieldRule`: which document, and where in it — the
+  fig path `rules[2]`, or `vocabulary` for a vocabulary document's one rule —
+  a rule was read from. `None` for a rule built in Rust. `explain`'s `shadows:`
+  line reads it; it is how precedence that include order decided becomes
+  visible.
+- **[`load_schema`]`(path, read)`**, where `read` is the caller's way of turning
+  a path into a `Value` — the CLI's reader over the filesystem, an embedder's
+  own over a workspace, a test's over a map — so the library stays free of file
+  I/O. It returns a `Loaded` holding the schema and every `Finding` it noticed
+  on the way, each naming its document, or a `LoadError` naming the document,
+  the path within it, and the reason. Relative `include` and `from` paths reach
+  `read` resolved against the directory of the document that wrote them, with
+  `.` and `..` folded lexically, so the same document by two spellings is one
+  document to the include-twice and cycle checks.
+
+The pure half over one document — what it declares, with includes and `from`
+paths left as paths — is internal: nothing outside the loader wanted it, and
+publishing it would have fixed the shape of a parsed-but-unresolved rule, which
+is the one thing here that had no consumer.
+
+[`Constraint`]: https://docs.rs/fig-schema/latest/fig_schema/enum.Constraint.html
+[`Origin`]: https://docs.rs/fig-schema/latest/fig_schema/struct.Origin.html
+[`load_schema`]: https://docs.rs/fig-schema/latest/fig_schema/fn.load_schema.html
 
 ## Deferred
 

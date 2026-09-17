@@ -2,12 +2,23 @@
 title: A schema document format
 author: adammharris
 created: 2026-09-02
-updated: 2026-09-10
-status: in-progress
+updated: 2026-09-17
+status: done
 part_of: '[tasks](/docs/tasks/tasks.md)'
 ---
 
 # A schema document format
+
+## Status
+
+**Done.** The loader is `05f61ff` — `Constraint`, `Origin`, `load_schema`,
+and `lint` over a schema document — on the engine adjustments in `995b82c`;
+[docs/schema-format.md](/docs/schema-format.md) is spec 1, `implemented`, and
+the release that carries it is the one `Tint::ALL` was added for. The three
+verbs the format unblocked are `2e9bb55`, under [the CLI
+task](/docs/tasks/schema-aware-cli.md). One name in the spec's draft did not
+survive contact: `parse_schema`, the pure half over one document, is internal
+rather than public, because nothing outside the loader wanted it.
 
 **Done when** a `Schema` can be written as a fig document, loaded by this crate,
 and validated against — and a vocabulary document is that same document kind
@@ -21,12 +32,9 @@ and a rule's `at` is a `PathPat`. `field: audience` becomes
 because `validate_enum` validates a sequence element-wise — not because the
 pattern says `audience[]`. It works, and it works for one reason, in one branch.
 
-**The format is designed** — [docs/schema-format.md](/docs/schema-format.md),
-status `draft` until the loader reads it. This task keeps the argument and
-what was not adopted; the spec keeps the format. What remains is the code:
-`Constraint`, `Origin`, `parse_schema`, `load_schema`, `lint` over a schema
-document, and the three engine adjustments under [What the design
-changed](#what-the-design-changed).
+**The format is designed** — [docs/schema-format.md](/docs/schema-format.md).
+This task keeps the argument and what was not adopted; the spec keeps the
+format, and the loader reads it.
 
 ## Why
 
@@ -187,8 +195,9 @@ are listed here so the reasoning is findable from the task.
 ## What the design changed
 
 Three things in the engine, found by reading the consumers rather than the
-model. All are to the unreleased library half of [the CLI
-task](/docs/tasks/schema-aware-cli.md), so none is a behavioural change yet.
+model. They were meant to land before the library half of [the CLI
+task](/docs/tasks/schema-aware-cli.md) was released; it shipped first, as
+0.3.0, so each carries a `Behavioural-change:` trailer on `995b82c`.
 
 - **`FieldType::admits` follows the item-list convention.** provui emits the
   same `ty: Str` on `audience` and `audience[]`, and prov's docs say a declared
