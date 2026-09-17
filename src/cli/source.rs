@@ -66,8 +66,27 @@ pub fn format_words() -> String {
 
 /// Read `path` and parse it, as `forced` if given and by its extension
 /// otherwise. `-` reads standard input, which has no extension and therefore
-/// needs `--input`.
+/// needs `--input`. A markdown file with no frontmatter or endmatter block is
+/// an error: there is no document in it to judge.
 pub fn load(path: &str, forced: Option<Format>) -> Result<Value, String> {
+    load_with(path, forced, NoBlock::IsAnError)
+}
+
+/// [`load`], except that a markdown file with no frontmatter or endmatter
+/// block is an **empty document** — what `check` wants, since a note with no
+/// frontmatter has nothing wrong with it under a schema that requires nothing.
+pub fn load_or_empty(path: &str, forced: Option<Format>) -> Result<Value, String> {
+    load_with(path, forced, NoBlock::IsEmpty)
+}
+
+/// What a markdown file with no block in it is.
+#[derive(Clone, Copy)]
+enum NoBlock {
+    IsAnError,
+    IsEmpty,
+}
+
+fn load_with(path: &str, forced: Option<Format>, no_block: NoBlock) -> Result<Value, String> {
     let bytes = read(path)?;
 
     // A markdown file holds its document in a frontmatter or endmatter block,
@@ -75,7 +94,7 @@ pub fn load(path: &str, forced: Option<Format>) -> Result<Value, String> {
     // TOML block and a ```` ```fig ```` fenced one are both `.md`. `--input`
     // still wins, for a caller who knows better than the sniff.
     if forced.is_none() && is_markdown(path) {
-        return embedded(path, &bytes);
+        return embedded(path, &bytes, no_block);
     }
 
     let format = match forced {
@@ -104,14 +123,18 @@ fn read(path: &str) -> Result<Vec<u8>, String> {
 }
 
 /// The document inside a markdown host file.
-fn embedded(path: &str, bytes: &[u8]) -> Result<Value, String> {
+fn embedded(path: &str, bytes: &[u8], no_block: NoBlock) -> Result<Value, String> {
     let source = std::str::from_utf8(bytes).map_err(|_| format!("{path}: not valid UTF-8"))?;
-    let kind = fig::detect(source).ok_or_else(|| {
-        format!(
-            "{path} holds no frontmatter or endmatter block, so there is no \
-             vocabulary document in it"
-        )
-    })?;
+    let kind = match (fig::detect(source), no_block) {
+        (Some(kind), _) => kind,
+        (None, NoBlock::IsEmpty) => return Ok(Value::Map(Vec::new())),
+        (None, NoBlock::IsAnError) => {
+            return Err(format!(
+                "{path} holds no frontmatter or endmatter block, so there is no \
+                 document in it"
+            ));
+        }
+    };
     let (content, _) = fig::split(source, kind)
         .ok_or_else(|| format!("{path}: the {kind:?} block could not be read"))?;
     parse(path, content.as_bytes(), kind.inner_format())
@@ -146,6 +169,15 @@ fn explain_unsupported(format: Format) -> String {
 
 fn is_markdown(path: &str) -> bool {
     matches!(extension(path).as_deref(), Some("md" | "markdown"))
+}
+
+/// Every extension this binary reads a document from — the format table's,
+/// and markdown's. What a schema discovered beside a document may end in.
+pub fn extensions() -> impl Iterator<Item = &'static str> {
+    FORMATS
+        .iter()
+        .flat_map(|(_, _, extensions)| extensions.iter().copied())
+        .chain(["md", "markdown"])
 }
 
 fn extension_format(path: &str) -> Option<Format> {
