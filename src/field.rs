@@ -6,6 +6,7 @@
 //! [`crate::Validate`] on it.
 
 use std::fmt;
+use std::path::PathBuf;
 
 use fig::{ExtKind, Value};
 
@@ -66,16 +67,46 @@ impl FieldType {
     /// type, and this asks whether what the parser produced fits one.
     ///
     /// Mostly [`FieldType::of`] and equality, plus the widenings a reader
-    /// expects: [`Float`](Self::Float) admits an integer, and
-    /// [`Ref`](Self::Ref) admits a string, since a reference is stored as one.
-    /// [`Extended`](Self::Extended) admits an extended value of the same kind
-    /// and nothing else — a format with no literal for the kind parses it as a
-    /// string, and that string is a mismatch here.
+    /// expects, each of which is a convention the rest of the crate already
+    /// follows rather than a choice made here:
+    ///
+    /// - **A type names the item, and a list of items has the type too.**
+    ///   `Str` admits `public` and `[public, family]` alike, one level deep —
+    ///   a list of strings and not a list of lists — because an embedder
+    ///   declares a field once and writes it as a scalar or a list as the
+    ///   document pleases, which is how [`validate_enum`](crate::validate_enum)
+    ///   already checks one. An empty list is a list of items every one of
+    ///   which fits, so it fits.
+    /// - [`Float`](Self::Float) admits an integer, and [`Ref`](Self::Ref)
+    ///   admits a string, since a reference is stored as one.
+    /// - [`Extended`](Self::Extended) admits an extended value of the same
+    ///   kind, **or a string shaped like one** — the same cheap guard
+    ///   [`FieldType::coerce`] uses when writing one. YAML, JSON and markdown
+    ///   frontmatter have no date literal, so `created: 1979-05-27` there is
+    ///   text, and a date field that refused it would fail every document in
+    ///   those formats against its own schema. The value stays a string; this
+    ///   says only that it could be the type it was declared.
     pub fn admits(self, value: &Value) -> bool {
+        if self.admits_item(value) {
+            return true;
+        }
+        match value {
+            Value::Seq(items) => items.iter().all(|item| self.admits_item(item)),
+            _ => false,
+        }
+    }
+
+    /// [`FieldType::admits`] without the list rule: whether `value` itself
+    /// has this type.
+    fn admits_item(self, value: &Value) -> bool {
         let found = FieldType::of(value);
         match self {
             FieldType::Float => matches!(found, FieldType::Float | FieldType::Int),
             FieldType::Ref => found == FieldType::Str,
+            FieldType::Extended(kind) => match value {
+                Value::Str(text) => extended_text_fits(kind, text),
+                _ => found == self,
+            },
             expected => found == expected,
         }
     }
@@ -143,32 +174,100 @@ impl FieldType {
     }
 }
 
+/// Every type the schema document format can name, with its name: the table
+/// [`FieldType::from_name`] reads and [`FieldType`]'s `Display` writes, so the
+/// two cannot drift. The names are the ones prov's `fields.<name>.type`
+/// already uses, so a schema document, a prov config and an editor spell a
+/// type one way.
+///
+/// Not every [`ExtKind`] is here: a kind with no row (`NumberSpecial`, and the
+/// plist kinds) cannot be declared in a document, and displays as its fig name
+/// in kebab case instead.
+const NAMES: &[(&str, FieldType)] = &[
+    ("null", FieldType::Null),
+    ("bool", FieldType::Bool),
+    ("int", FieldType::Int),
+    ("float", FieldType::Float),
+    ("str", FieldType::Str),
+    ("ref", FieldType::Ref),
+    ("date", FieldType::Extended(ExtKind::LocalDate)),
+    ("datetime", FieldType::Extended(ExtKind::OffsetDateTime)),
+    (
+        "local-datetime",
+        FieldType::Extended(ExtKind::LocalDateTime),
+    ),
+    ("time", FieldType::Extended(ExtKind::LocalTime)),
+    ("enum", FieldType::Extended(ExtKind::EnumLiteral)),
+    ("char", FieldType::Extended(ExtKind::CharLiteral)),
+    ("map", FieldType::Map),
+    ("seq", FieldType::Seq),
+];
+
+impl FieldType {
+    /// The type a schema document's `type` key names — `int`, `str`, `date`,
+    /// `seq` — or `None` for a name the format does not define. The loader
+    /// treats that `None` as an error rather than a dropped type; see
+    /// [`FieldType::suggest_name`] for the sentence it adds.
+    ///
+    /// ```
+    /// use fig::ExtKind;
+    /// use fig_schema::FieldType;
+    ///
+    /// assert_eq!(FieldType::from_name("str"), Some(FieldType::Str));
+    /// assert_eq!(FieldType::from_name("date"), Some(FieldType::Extended(ExtKind::LocalDate)));
+    /// assert_eq!(FieldType::from_name("string"), None);
+    /// ```
+    pub fn from_name(name: &str) -> Option<FieldType> {
+        NAMES
+            .iter()
+            .find(|(known, _)| *known == name)
+            .map(|(_, ty)| *ty)
+    }
+
+    /// The name a person who wrote `name` most likely meant, for the error a
+    /// loader reports: `string` is answered with `str`, since that is figl's
+    /// own annotation name and the one most likely reached for; `boolean`,
+    /// `integer`, `list`, `array`, `object`, `dict` and `text` with the type
+    /// each is another word for. `None` when nothing is close.
+    pub fn suggest_name(name: &str) -> Option<&'static str> {
+        let lower = name.to_ascii_lowercase();
+        Some(match lower.as_str() {
+            "string" | "text" => "str",
+            "boolean" => "bool",
+            "integer" | "i64" | "u64" => "int",
+            "number" | "f64" | "double" => "float",
+            "list" | "array" | "sequence" => "seq",
+            "object" | "dict" | "mapping" | "table" => "map",
+            "reference" | "link" => "ref",
+            "local-date" => "date",
+            "offset-datetime" => "datetime",
+            "local-time" => "time",
+            _ => {
+                return NAMES
+                    .iter()
+                    .map(|(known, _)| *known)
+                    .find(|known| *known == lower);
+            }
+        })
+    }
+}
+
 impl fmt::Display for FieldType {
     /// The type's name as the schema document format spells it — `int`,
-    /// `str`, `seq` — so a message reads the way the rule was written. An
-    /// extended kind is its fig name in kebab case (`local-date`), or
+    /// `str`, `date`, `seq` — so a message reads the way the rule was written,
+    /// and [`FieldType::from_name`] reads it back. An extended kind the format
+    /// cannot name is its fig name in kebab case (`number-special`), or
     /// `extended` for a kind newer than this crate.
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        if let Some((name, _)) = NAMES.iter().find(|(_, ty)| ty == self) {
+            return f.write_str(name);
+        }
         f.write_str(match self {
-            FieldType::Null => "null",
-            FieldType::Bool => "bool",
-            FieldType::Int => "int",
-            FieldType::Float => "float",
-            FieldType::Str => "str",
-            FieldType::Ref => "ref",
-            FieldType::Map => "map",
-            FieldType::Seq => "seq",
-            FieldType::Extended(kind) => match kind {
-                ExtKind::OffsetDateTime => "offset-datetime",
-                ExtKind::LocalDateTime => "local-datetime",
-                ExtKind::LocalDate => "local-date",
-                ExtKind::LocalTime => "local-time",
-                ExtKind::EnumLiteral => "enum-literal",
-                ExtKind::CharLiteral => "char-literal",
-                ExtKind::NumberSpecial => "number-special",
-                // `ExtKind` is `#[non_exhaustive]`; see `extended_text_fits`.
-                _ => "extended",
-            },
+            FieldType::Extended(ExtKind::NumberSpecial) => "number-special",
+            FieldType::Extended(ExtKind::PlistDate) => "plist-date",
+            FieldType::Extended(ExtKind::PlistData) => "plist-data",
+            // `ExtKind` is `#[non_exhaustive]`; see `extended_text_fits`.
+            _ => "extended",
         })
     }
 }
@@ -246,6 +345,49 @@ pub struct FieldRule<C> {
     /// about the field, not a way of drawing it, and a host that ignores every
     /// other hint must still honour these.
     pub on_change: Vec<Consequence>,
+    /// Where this rule was read from, when it was read from a document rather
+    /// than built in Rust — see [`Origin`].
+    pub origin: Option<Origin>,
+}
+
+/// Which document a rule was read from, and where in it — what makes
+/// precedence *visible*. A schema composed from several documents decides
+/// which rule wins a path by include order, and a person asking "why did this
+/// rule govern, and what did it shadow" needs each rule to say where it came
+/// from. `fig-schema explain` prints one per matching rule.
+///
+/// `None` on a [`FieldRule`] built in Rust; set by
+/// [`load_schema`](crate::load_schema) on every rule it reads.
+///
+/// `#[non_exhaustive]`: an origin gains detail (a line, once fig exposes one)
+/// the same way an [`Issue`](crate::Issue) does. Built with [`Origin::new`].
+#[derive(Debug, Clone, PartialEq, Eq)]
+#[non_exhaustive]
+pub struct Origin {
+    /// The document, as the loader was given it or resolved it — so an
+    /// included document is named relative to the one that included it.
+    pub document: PathBuf,
+    /// Where in that document, as a fig path: `rules[2]` for the third entry
+    /// of a schema document's `rules`, `vocabulary` for the one rule a
+    /// vocabulary document declares.
+    pub at: String,
+}
+
+impl Origin {
+    /// A rule read from `document` at the fig path `at`.
+    pub fn new(document: impl Into<PathBuf>, at: impl Into<String>) -> Self {
+        Self {
+            document: document.into(),
+            at: at.into(),
+        }
+    }
+}
+
+impl fmt::Display for Origin {
+    /// `vocab/audience.figl rules[0]` — the document, then the path.
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(f, "{} {}", self.document.display(), self.at)
+    }
 }
 
 impl<C> FieldRule<C> {
@@ -258,6 +400,7 @@ impl<C> FieldRule<C> {
             constraint: None,
             present: Presentation::default(),
             on_change: Vec::new(),
+            origin: None,
         }
     }
 
@@ -307,6 +450,28 @@ impl<C> FieldRule<C> {
         self.on_change = consequences;
         self
     }
+
+    /// Record where this rule was read from. The loader's; a rule built in
+    /// Rust has no origin to record.
+    pub fn origin(mut self, origin: Origin) -> Self {
+        self.origin = Some(origin);
+        self
+    }
+
+    /// The same rule with its constraint mapped into another type — how an
+    /// embedder turns a loaded [`Schema<Constraint>`](crate::Constraint) into
+    /// a schema over its own constraint type, keeping every other fact about
+    /// the rule as read.
+    pub fn map_constraint<D>(self, f: impl FnOnce(C) -> D) -> FieldRule<D> {
+        FieldRule {
+            at: self.at,
+            ty: self.ty,
+            constraint: self.constraint.map(f),
+            present: self.present,
+            on_change: self.on_change,
+            origin: self.origin,
+        }
+    }
 }
 
 impl<C: Validate> FieldRule<C> {
@@ -342,6 +507,24 @@ impl<C> Schema<C> {
     /// The rules, in declaration order.
     pub fn rules(&self) -> &[FieldRule<C>] {
         &self.rules
+    }
+
+    /// The rules, owned — for concatenating schemas, or for mapping every
+    /// constraint into another type with [`FieldRule::map_constraint`].
+    pub fn into_rules(self) -> Vec<FieldRule<C>> {
+        self.rules
+    }
+
+    /// Every rule's constraint mapped into another type; see
+    /// [`FieldRule::map_constraint`].
+    pub fn map_constraints<D>(self, mut f: impl FnMut(C) -> D) -> Schema<D> {
+        Schema {
+            rules: self
+                .rules
+                .into_iter()
+                .map(|rule| rule.map_constraint(&mut f))
+                .collect(),
+        }
     }
 
     /// Whether the schema carries no rules (nothing to apply).
@@ -557,28 +740,124 @@ mod tests {
     }
 
     #[test]
-    fn an_extended_field_admits_only_its_own_kind() {
+    fn an_extended_field_admits_its_own_kind_and_a_string_shaped_like_one() {
         let date = Value::Extended {
             kind: ExtKind::LocalDate,
             text: "1979-05-27".into(),
         };
-        assert!(FieldType::Extended(ExtKind::LocalDate).admits(&date));
+        let date_field = FieldType::Extended(ExtKind::LocalDate);
+        assert!(date_field.admits(&date));
         assert!(!FieldType::Extended(ExtKind::LocalTime).admits(&date));
-        // A format without the literal parses the same text as a string, and
-        // that is a mismatch: the field asked for a date and got text.
-        assert!(!FieldType::Extended(ExtKind::LocalDate).admits(&Value::Str("1979-05-27".into())));
         assert!(!FieldType::Str.admits(&date));
+        // YAML, JSON and markdown frontmatter have no date literal, so the same
+        // text parses there as a string — and a date field that refused it
+        // would fail every such document against its own schema.
+        assert!(date_field.admits(&Value::Str("1979-05-27".into())));
+        // Only a string *shaped* like one, by the guard `coerce` also uses.
+        assert!(!date_field.admits(&Value::Str("yesterday".into())));
+        assert!(!date_field.admits(&Value::Str("".into())));
+        assert!(!date_field.admits(&Value::Int(1979)));
     }
 
     #[test]
-    fn a_type_displays_as_the_format_spells_it() {
+    fn a_type_admits_a_list_of_its_items_one_level_deep() {
+        let strings = Value::Seq(vec![Value::Str("a".into()), Value::Str("b".into())]);
+        assert!(FieldType::Str.admits(&strings));
+        assert!(FieldType::Ref.admits(&strings));
+        assert!(!FieldType::Int.admits(&strings));
+        // A list of lists is not a list of items.
+        let nested = Value::Seq(vec![strings.clone()]);
+        assert!(!FieldType::Str.admits(&nested));
+        assert!(FieldType::Seq.admits(&nested));
+        // Every item has to fit, and an empty list vacuously does.
+        let mixed = Value::Seq(vec![Value::Str("a".into()), Value::Int(1)]);
+        assert!(!FieldType::Str.admits(&mixed));
+        assert!(!FieldType::Float.admits(&mixed));
+        assert!(FieldType::Str.admits(&Value::Seq(vec![])));
+        // The widenings apply item-wise too.
+        assert!(FieldType::Float.admits(&Value::Seq(vec![Value::Int(1), Value::Float(0.5)])));
+        assert!(
+            FieldType::Extended(ExtKind::LocalDate)
+                .admits(&Value::Seq(vec![Value::Str("1979-05-27".into())]))
+        );
+    }
+
+    #[test]
+    fn a_type_displays_as_the_format_spells_it_and_reads_back() {
         assert_eq!(FieldType::Int.to_string(), "int");
         assert_eq!(FieldType::Str.to_string(), "str");
         assert_eq!(FieldType::Seq.to_string(), "seq");
+        // The extended kinds are spelled prov's way, not fig's.
+        assert_eq!(FieldType::Extended(ExtKind::LocalDate).to_string(), "date");
         assert_eq!(
-            FieldType::Extended(ExtKind::LocalDate).to_string(),
-            "local-date"
+            FieldType::Extended(ExtKind::OffsetDateTime).to_string(),
+            "datetime"
         );
+        assert_eq!(
+            FieldType::Extended(ExtKind::LocalDateTime).to_string(),
+            "local-datetime"
+        );
+        assert_eq!(FieldType::Extended(ExtKind::LocalTime).to_string(), "time");
+        assert_eq!(
+            FieldType::Extended(ExtKind::EnumLiteral).to_string(),
+            "enum"
+        );
+        assert_eq!(
+            FieldType::Extended(ExtKind::CharLiteral).to_string(),
+            "char"
+        );
+        // A kind the format cannot name still has a spelling.
+        assert_eq!(
+            FieldType::Extended(ExtKind::NumberSpecial).to_string(),
+            "number-special"
+        );
+        // Every name in the table round-trips through `from_name`.
+        for (name, ty) in NAMES {
+            assert_eq!(FieldType::from_name(name), Some(*ty), "{name}");
+            assert_eq!(ty.to_string(), *name, "{ty:?}");
+        }
+        assert_eq!(FieldType::from_name("number-special"), None);
+        assert_eq!(FieldType::from_name("string"), None);
+    }
+
+    #[test]
+    fn a_misspelled_type_name_gets_the_one_meant() {
+        assert_eq!(FieldType::suggest_name("string"), Some("str"));
+        assert_eq!(FieldType::suggest_name("String"), Some("str"));
+        assert_eq!(FieldType::suggest_name("Int"), Some("int"));
+        assert_eq!(FieldType::suggest_name("boolean"), Some("bool"));
+        assert_eq!(FieldType::suggest_name("local-date"), Some("date"));
+        assert_eq!(FieldType::suggest_name("array"), Some("seq"));
+        assert_eq!(FieldType::suggest_name("wibble"), None);
+    }
+
+    #[test]
+    fn a_rule_can_say_where_it_came_from_and_change_its_constraint_type() {
+        let rule: FieldRule<AlwaysReject> = FieldRule::new(PathPat::key("status"))
+            .ty(FieldType::Str)
+            .constraint(AlwaysReject)
+            .origin(Origin::new("schema.figl", "rules[0]"));
+        assert_eq!(
+            rule.origin.as_ref().map(ToString::to_string),
+            Some("schema.figl rules[0]".to_owned())
+        );
+        // A built rule has none.
+        assert_eq!(
+            FieldRule::<AlwaysReject>::new(PathPat::key("x")).origin,
+            None
+        );
+        // Mapping the constraint keeps everything else.
+        let mapped: FieldRule<&'static str> = rule.map_constraint(|_| "mine");
+        assert_eq!(mapped.constraint, Some("mine"));
+        assert_eq!(mapped.ty, Some(FieldType::Str));
+        assert!(mapped.origin.is_some());
+
+        let schema = Schema::new(vec![
+            FieldRule::new(PathPat::key("a")).constraint(AlwaysReject),
+        ]);
+        let mapped = schema.map_constraints(|_| 1u8);
+        assert_eq!(mapped.rules()[0].constraint, Some(1));
+        assert_eq!(mapped.into_rules().len(), 1);
     }
 
     #[test]

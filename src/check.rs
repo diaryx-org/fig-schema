@@ -215,9 +215,15 @@ impl<C: Validate> Schema<C> {
 }
 
 /// What `rule` says about `node`: a type mismatch if its shape is wrong, and
-/// the constraint's answer if that is not `Ok` — unless an equal issue is
+/// the constraint's answer if that is not `Ok` — each unless the same thing is
 /// already among the `descendants`' verdicts, in which case this is the
-/// container-level echo of an element-wise check and is dropped.
+/// container-level echo of an item-wise check and is dropped.
+///
+/// For a constraint that is an *equal issue*: [`validate_enum`](crate::validate_enum)
+/// carries an item's issue up to the list. For a type it is *any* mismatch
+/// below: a type admits a list whose every item fits, so a list that does not
+/// fit is one with an item that does not, and that item has already said so
+/// at its own path.
 fn judge<C: Validate>(
     rule: &FieldRule<C>,
     node: &Value,
@@ -225,7 +231,10 @@ fn judge<C: Validate>(
 ) -> Vec<VerdictKind> {
     let mut kinds = Vec::new();
     if let Some(expected) = rule.ty {
-        if !expected.admits(node) {
+        let item_already_said = descendants
+            .iter()
+            .any(|v| matches!(v.kind, VerdictKind::TypeMismatch { .. }));
+        if !expected.admits(node) && !item_already_said {
             kinds.push(VerdictKind::TypeMismatch {
                 expected,
                 found: FieldType::of(node),
@@ -406,20 +415,59 @@ mod tests {
     }
 
     #[test]
-    fn a_type_mismatch_at_the_container_is_not_deduplicated_against_an_item() {
+    fn a_containers_type_mismatch_is_dropped_when_an_item_already_reported_one() {
         let schema = Schema::new(vec![
             FieldRule::new(PathPat::key("tags"))
                 .ty(FieldType::Map)
                 .constraint_opt(None),
             FieldRule::new(PathPat::each_item_of("tags")).ty(FieldType::Map),
         ]);
-        // Two different nodes with the wrong shape are two facts.
+        // `map` admits a list of maps, so `tags: [x]` fails only because `x`
+        // is not one — and `x` has already said so at its own path.
         assert_eq!(
             report(&schema, "tags: [x]\n"),
-            [
-                "tags[0]: expected map, found str",
-                "tags: expected map, found seq"
-            ]
+            ["tags[0]: expected map, found str"]
+        );
+        // With no item rule the container is the one that speaks.
+        let schema = Schema::new(vec![
+            FieldRule::new(PathPat::key("tags"))
+                .ty(FieldType::Map)
+                .constraint_opt(None),
+        ]);
+        assert_eq!(
+            report(&schema, "tags: [x]\n"),
+            ["tags: expected map, found seq"]
+        );
+    }
+
+    #[test]
+    fn a_field_declared_once_is_governed_as_a_scalar_and_as_a_list() {
+        // An embedder declares `audience: str` once, and a document writes it
+        // either way. This is the convention `validate_enum` already follows.
+        let schema = Schema::new(vec![
+            FieldRule::new(PathPat::key("audience"))
+                .ty(FieldType::Str)
+                .constraint(audience()),
+        ]);
+        assert!(report(&schema, "audience: public\n").is_empty());
+        assert!(report(&schema, "audience: [public, family]\n").is_empty());
+        assert_eq!(
+            report(&schema, "audience: [public, 3]\n"),
+            ["audience: expected str, found seq"]
+        );
+    }
+
+    #[test]
+    fn a_date_field_admits_the_string_a_dateless_format_parses() {
+        let schema = Schema::new(vec![
+            FieldRule::new(PathPat::key("created"))
+                .ty(FieldType::Extended(fig::ExtKind::LocalDate))
+                .constraint_opt(None),
+        ]);
+        assert!(report(&schema, "created: 1979-05-27\n").is_empty());
+        assert_eq!(
+            report(&schema, "created: yesterday\n"),
+            ["created: expected date, found str"]
         );
     }
 
@@ -463,8 +511,9 @@ mod tests {
             report(&schema, "items:\n  - n: 1\n  - n: two\n"),
             ["items[1].n: expected int, found str"]
         );
-        // The root is a node like any other, at the empty path.
-        let verdicts = schema.check(&Value::Seq(vec![]));
+        // The root is a node like any other, at the empty path. (Not an empty
+        // list, which is vacuously a list of maps and so fits.)
+        let verdicts = schema.check(&Value::Seq(vec![Value::Int(1)]));
         assert_eq!(verdicts.len(), 1);
         assert_eq!(verdicts[0].at(), "");
         assert!(verdicts[0].path.is_empty());
