@@ -338,10 +338,10 @@ fn split_findings(path: &str, findings: &[Finding]) -> (Vec<String>, Vec<String>
     let mut notes = Vec::new();
     for finding in findings {
         let mut where_ = String::new();
-        if let Some(document) = &finding.document {
-            if document != std::path::Path::new(path) {
-                where_.push_str(&document.display().to_string());
-            }
+        if let Some(document) = &finding.document
+            && document != std::path::Path::new(path)
+        {
+            where_.push_str(&document.display().to_string());
         }
         if !finding.at.is_empty() {
             if !where_.is_empty() {
@@ -530,10 +530,10 @@ fn explain_path(
         None => writeln!(out, "  value: (absent)")?,
         Some(node) => {
             write!(out, "  value: {}", sketch(node))?;
-            if let Some(rule) = rule {
-                if let Some(verdict) = verdict_of(rule, node) {
-                    write!(out, "  — {verdict}")?;
-                }
+            if let Some(rule) = rule
+                && let Some(verdict) = verdict_of(rule, node)
+            {
+                write!(out, "  — {verdict}")?;
             }
             writeln!(out)?;
         }
@@ -604,13 +604,13 @@ fn describe_rule(
 
 /// What `rule` makes of `node`, as a phrase, or nothing when it is fine.
 fn verdict_of(rule: &FieldRule<Constraint>, node: &Value) -> Option<String> {
-    if let Some(expected) = rule.ty {
-        if !expected.admits(node) {
-            return Some(format!(
-                "not {expected}: expected {expected}, found {}",
-                FieldType::of(node)
-            ));
-        }
+    if let Some(expected) = rule.ty
+        && !expected.admits(node)
+    {
+        return Some(format!(
+            "not {expected}: expected {expected}, found {}",
+            FieldType::of(node)
+        ));
     }
     let validation = rule.validate(node);
     let issue = validation.issue()?;

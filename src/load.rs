@@ -546,10 +546,10 @@ where
             });
         }
         let repeat = self.loaded.contains(path);
-        if let Some((document, at)) = referrer {
-            if repeat {
-                self.note(document, at, FindingKind::IncludedTwice);
-            }
+        if let Some((document, at)) = referrer
+            && repeat
+        {
+            self.note(document, at, FindingKind::IncludedTwice);
         }
 
         let value = (self.read)(path).map_err(|message| {

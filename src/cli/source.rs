@@ -135,7 +135,7 @@ fn embedded(path: &str, bytes: &[u8], no_block: NoBlock) -> Result<Value, String
             ));
         }
     };
-    let (content, _) = fig::split(source, kind)
+    let (_, content, _) = fig::split(source, kind)
         .ok_or_else(|| format!("{path}: the {kind:?} block could not be read"))?;
     parse(path, content.as_bytes(), kind.inner_format())
 }

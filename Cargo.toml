@@ -27,7 +27,7 @@ version = "0.3.0"
 edition = "2024"
 # Minimum supported Rust version, enforced by the `msrv` CI job, which reads
 # this value.
-rust-version = "1.85"
+rust-version = "1.88"
 license = "MIT OR Apache-2.0"
 repository = "https://github.com/diaryx-org/fig-schema"
 
@@ -43,4 +43,4 @@ path = "src/main.rs"
 [dependencies]
 # The one dependency, and the reason the schema document format can be a fig
 # document without adding a second: the parser is already here.
-fig = "4"
+fig = "5"
