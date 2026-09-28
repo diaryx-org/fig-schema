@@ -40,6 +40,16 @@ elsewhere:
 
 <!-- git-cliff:begin — generated; edits here are overwritten -->
 
+_No commits since the last tag._
+
+<!-- git-cliff:end -->
+
+## v0.4.0 — 2026-09-28
+
+### Breaking
+
+- **deps** — move to fig 5 ([`04810d7`](https://github.com/diaryx-org/fig-schema/commit/04810d7f79e37ad6c0b1670e16a52014a5fd71be))
+
 ### Added
 
 - **load** — a schema read from a document — Constraint, Origin, load_schema, and lint over it ([`05f61ff`](https://github.com/diaryx-org/fig-schema/commit/05f61ff7094c52e2e5ab134183cb83af64f2a916))
@@ -97,7 +107,13 @@ elsewhere:
   frontmatter says there is no *document* in it, where it said no
   *vocabulary document*. Still exit 1.
 
-<!-- git-cliff:end -->
+- fig-schema now requires `fig = "5"`. A consumer still
+pinned to fig 4.x resolves two copies of fig — refused outright, since
+fig-sys links the one native library — and its `fig::Value` stops being
+fig-schema's `Value`; move the consumer's own pin to 5 alongside.
+
+- fig-schema's rust-version is 1.88, up from 1.85.
+
 
 ## v0.3.0 — 2026-09-14
 
