@@ -60,7 +60,3 @@ name = "fig-sys-windows-x64-msvc"
 version = "5.0.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "23c5ed649e0c9f18715893960ba6cc8f252615d40df349d28a3a817e50e29743"
-
-[[package]]
-name = "xtask"
-version = "0.0.0"
