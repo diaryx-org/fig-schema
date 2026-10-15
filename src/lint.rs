@@ -343,7 +343,7 @@ const TERM_KEYS: &[&str] = &["label", "description", "retired", "tint"];
 ///
 /// let document = fig::Document::parse(
 ///     b"vocabulary:\n  field: audience\n  values: cloesd\nterms:\n  public:\n",
-///     fig::Format::Yaml,
+///     fig_yaml::format().unwrap(),
 /// ).unwrap();
 ///
 /// let findings = lint_vocabulary(&document.to_value().unwrap());
@@ -601,7 +601,7 @@ mod tests {
     use super::*;
 
     fn lint(yaml: &str) -> Vec<Finding> {
-        let document = fig::Document::parse(yaml.as_bytes(), fig::Format::Yaml).unwrap();
+        let document = fig::Document::parse(yaml.as_bytes(), fig_yaml::format().unwrap()).unwrap();
         lint_vocabulary(&document.to_value().unwrap())
     }
 

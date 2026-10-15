@@ -139,11 +139,10 @@ Two limits worth knowing, both inherited rather than chosen:
   with no per-node spans, so nothing downstream of a parse knows which line a key
   came from. `audience[1]` is the most any consumer of the parse can say.
 - **It reads fewer formats than `fig check` does.** json, jsonc, json5, yaml,
-  toml and figl, plus a markdown file's frontmatter or endmatter block. fig's own
-  `check` also takes xml, ini, dotenv, properties, nestedtext and the canonical
-  form; the Rust binding has no variant for those, and the formats it *does*
-  name beyond fig's default language set need the Zig core compiled from source,
-  which `cargo install` must not require. `fig convert` moves a document into one
+  toml, zon and figl, plus a markdown file's frontmatter or endmatter block.
+  fig's own `check` also takes ini, dotenv, properties, plist and nestedtext:
+  fig's core carries no language until a program registers one, and this
+  binary registers the ones it names. `fig convert` moves a document into one
   of them.
 
 ## Design notes

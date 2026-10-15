@@ -535,12 +535,14 @@ fn check_on_standard_input_needs_the_schema_named() {
         .stderr(Stdio::piped())
         .spawn()
         .unwrap();
-    child
+    // The refusal comes before standard input is read, so the binary may have
+    // exited and closed the pipe by the time this writes: a broken pipe here
+    // is the outcome under test arriving early, not a failure.
+    let _ = child
         .stdin
         .as_mut()
         .unwrap()
-        .write_all(b"audience: [public]\n")
-        .unwrap();
+        .write_all(b"audience: [public]\n");
     let output = child.wait_with_output().unwrap();
     assert_eq!(code(&output), 2);
     assert!(stderr(&output).contains("--schema"), "{}", stderr(&output));

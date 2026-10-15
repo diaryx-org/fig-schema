@@ -678,7 +678,7 @@ mod tests {
     }
 
     fn parse(yaml: &str) -> Option<VocabularyDoc> {
-        let doc = fig::Document::parse(yaml.as_bytes(), fig::Format::Yaml).unwrap();
+        let doc = fig::Document::parse(yaml.as_bytes(), fig_yaml::format().unwrap()).unwrap();
         parse_vocabulary(&doc.to_value().unwrap())
     }
 

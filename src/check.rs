@@ -158,7 +158,7 @@ impl<C: Validate> Schema<C> {
     ///
     /// let document = fig::Document::parse(
     ///     b"audience: [public, famly]\ncount: three\ntitle: untouched\n",
-    ///     fig::Format::Yaml,
+    ///     fig_yaml::format().unwrap(),
     /// ).unwrap();
     /// let verdicts = schema.check(&document.to_value().unwrap());
     ///
@@ -287,7 +287,7 @@ mod tests {
     }
 
     fn parse(yaml: &str) -> Value {
-        fig::Document::parse(yaml.as_bytes(), fig::Format::Yaml)
+        fig::Document::parse(yaml.as_bytes(), fig_yaml::format().unwrap())
             .unwrap()
             .to_value()
             .unwrap()

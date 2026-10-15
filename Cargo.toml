@@ -29,16 +29,46 @@ rust-version = "1.88"
 license = "MIT OR Apache-2.0"
 repository = "https://github.com/diaryx-org/fig-schema"
 
-# The command line. No `required-features`, and that is the point: the argument
-# parsing is hand-rolled over `std::env::args`, exactly as fig's own CLI is, so
-# the binary costs the library nothing and `cargo install fig-schema` produces a
-# working `fig-schema` with no feature flag to remember. A crate whose whole
-# manifest is one dependency does not get to grow an argument parser.
+# The command line, behind the default `cli` feature. fig 7 carries no
+# language until a program brings one, so the binary depends on the five it
+# names (and on twig, which finds the block inside a markdown file), while a
+# library caller turns default features off and gets the schema layer over
+# fig's value tree with nothing else. `cargo install fig-schema` still
+# produces a working `fig-schema` with no flag to remember.
 [[bin]]
 name = "fig-schema"
 path = "src/main.rs"
+required-features = ["cli"]
+
+[features]
+default = ["cli"]
+cli = [
+    "dep:fig-json",
+    "dep:fig-yaml",
+    "dep:fig-toml",
+    "dep:fig-zon",
+    "dep:fig-figl",
+    "dep:twig-doc",
+    "dep:twig-markdown",
+]
 
 [dependencies]
-# The one dependency, and the reason the schema document format can be a fig
-# document without adding a second: the parser is already here.
-fig = "5"
+# The library's one dependency: the schema document format is a fig document,
+# and its values are fig's.
+fig = "7"
+# The command line's languages, each without serde.
+fig-json = { version = "7", default-features = false, features = ["fig"], optional = true }
+fig-yaml = { version = "7", default-features = false, features = ["fig"], optional = true }
+fig-toml = { version = "7", default-features = false, features = ["fig"], optional = true }
+fig-zon = { version = "7", default-features = false, features = ["fig"], optional = true }
+fig-figl = { version = "7", default-features = false, features = ["fig"], optional = true }
+# A markdown file's frontmatter or endmatter, located by twig (fig 6 took
+# embedding out of fig).
+twig-doc = { version = "6", optional = true }
+twig-markdown = { version = "6", optional = true }
+
+[dev-dependencies]
+# The tests and doc examples parse YAML, TOML and figl.
+fig-yaml = { version = "7", default-features = false, features = ["fig"] }
+fig-toml = { version = "7", default-features = false, features = ["fig"] }
+fig-figl = { version = "7", default-features = false, features = ["fig"] }

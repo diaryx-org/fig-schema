@@ -181,7 +181,7 @@ impl FieldType {
 /// type one way.
 ///
 /// Not every [`ExtKind`] is here: a kind with no row (`NumberSpecial`, and the
-/// plist kinds) cannot be declared in a document, and displays as its fig name
+/// plist date, a byte string) cannot be declared in a document, and displays as its fig name
 /// in kebab case instead.
 const NAMES: &[(&str, FieldType)] = &[
     ("null", FieldType::Null),
@@ -265,7 +265,7 @@ impl fmt::Display for FieldType {
         f.write_str(match self {
             FieldType::Extended(ExtKind::NumberSpecial) => "number-special",
             FieldType::Extended(ExtKind::PlistDate) => "plist-date",
-            FieldType::Extended(ExtKind::PlistData) => "plist-data",
+            FieldType::Extended(ExtKind::Data) => "data",
             // `ExtKind` is `#[non_exhaustive]`; see `extended_text_fits`.
             _ => "extended",
         })

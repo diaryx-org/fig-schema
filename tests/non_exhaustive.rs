@@ -192,7 +192,7 @@ fn a_vocabulary_doc_is_constructible_in_code_as_well_as_parsed() {
 
     let doc = fig::Document::parse(
         b"vocabulary:\n  field: status\n  values: closed\nterms:\n  active:\n",
-        fig::Format::Yaml,
+        fig_yaml::format().unwrap(),
     )
     .unwrap();
     let parsed = parse_vocabulary(&doc.to_value().unwrap()).expect("a vocabulary document");
@@ -337,7 +337,7 @@ fn a_whole_document_check_is_reachable_and_its_verdicts_are_readable() {
 count: three
 part_of: ../index.md
 ",
-        fig::Format::Yaml,
+        fig_yaml::format().unwrap(),
     )
     .unwrap();
     let verdicts: Vec<Verdict> = schema.check(&document.to_value().unwrap());
