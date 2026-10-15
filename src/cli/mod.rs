@@ -85,7 +85,7 @@ usage: fig-schema <command> [<arguments>]
     `.config/fig-schema.<ext>`, walking up from the document's directory, and
     only that one file — what it includes is written in it
   -i, --input: read every document as this format, instead of inferring it from
-    the extension (json, jsonc, json5, yaml, toml, zon, fig)
+    the extension (json, jsonc, json5, yaml, toml, zon, figl)
   --strict: treat notes as errors too
   -q, --quiet: print nothing for a clean file
   reads standard input when <file> is `-`, which needs --input, and --schema

@@ -282,7 +282,7 @@ impl std::error::Error for PatternError {}
 /// use fig::Value;
 /// use fig_schema::{Seg, value_at};
 ///
-/// let document = fig::Document::parse(b"audience: [public, family]\n", fig::Format::Yaml)
+/// let document = fig::Document::parse(b"audience: [public, family]\n", fig_yaml::format().unwrap())
 ///     .unwrap()
 ///     .to_value()
 ///     .unwrap();
@@ -644,7 +644,7 @@ mod tests {
     fn value_at_walks_keys_and_indexes() {
         let document = fig::Document::parse(
             b"items:\n  - title: one\n  - title: two\nk: v\n",
-            fig::Format::Yaml,
+            fig_yaml::format().unwrap(),
         )
         .unwrap()
         .to_value()

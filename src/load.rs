@@ -404,7 +404,7 @@ const CONSEQUENCE_KEYS: &[&str] = &["when", "severity", "message"];
 /// ");
 /// let read = |path: &Path| -> Result<Value, String> {
 ///     let text = documents.get(path).ok_or_else(|| "no such document".to_owned())?;
-///     let document = fig::Document::parse(text.as_bytes(), fig::Format::Yaml)
+///     let document = fig::Document::parse(text.as_bytes(), fig_yaml::format().unwrap())
 ///         .map_err(|e| e.to_string())?;
 ///     document.to_value().map_err(|e| e.to_string())
 /// };
@@ -1116,9 +1116,9 @@ mod tests {
                 .find(|(known, _)| *known == name)
                 .ok_or_else(|| format!("no such document: {name}"))?;
             let format = match path.extension().and_then(|e| e.to_str()) {
-                Some("yaml") => fig::Format::Yaml,
-                Some("toml") => fig::Format::Toml,
-                Some("figl") => fig::Format::Fig,
+                Some("yaml") => fig_yaml::format().unwrap(),
+                Some("toml") => fig_toml::format().unwrap(),
+                Some("figl") => fig_figl::format().unwrap(),
                 other => return Err(format!("no format for {other:?}")),
             };
             let document =
@@ -1252,7 +1252,7 @@ rules:
         .unwrap();
         let document = fig::Document::parse(
             b"audience: [public, famly]\ncount: three\npart_of: ../index.md\ntitle: x\n",
-            fig::Format::Yaml,
+            fig_yaml::format().unwrap(),
         )
         .unwrap()
         .to_value()
