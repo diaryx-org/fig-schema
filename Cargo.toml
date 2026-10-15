@@ -18,7 +18,7 @@ publish = true
 [workspace]
 members = ["xtask"]
 
-# One `version = "…"` line for the whole repository, which is what `dx bump`
+# One `version = "…"` line for the whole repository, which is what `release bump`
 # rewrites and what the package inherits. Keeping it here rather than in
 # `[package]` is what lets the shared release tooling assert that exactly one
 # such line exists.
