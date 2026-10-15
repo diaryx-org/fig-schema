@@ -44,6 +44,37 @@ _No commits since the last tag._
 
 <!-- git-cliff:end -->
 
+## v0.5.0 — 2026-10-15
+
+### Breaking
+
+- **deps** — move to fig 7 ([`4dc071e`](https://github.com/diaryx-org/fig-schema/commit/4dc071e500377a0d2bfb7ee111d0dd9f667df2d8))
+
+### Fixed
+
+- **xtask** — send the release commands that left xtask to `release`, not `dx` ([`9dc8712`](https://github.com/diaryx-org/fig-schema/commit/9dc8712cb05ebe04243b300b02fe17361ceecec2))
+- **ci** — restore the cache, and Zig, for a job whose runner leaves out builds ([`a7c8fdd`](https://github.com/diaryx-org/fig-schema/commit/a7c8fdd2aaa489d620fe72b181670bc01c8f6070))
+
+### Behavioural changes
+
+- `FieldType::Extended(ExtKind::Data)` displays as
+  `data`. fig 6 renamed plist's `PlistData` to `Data`, any format's byte
+  string, and it displayed as `plist-data`.
+
+- `fig-schema` reads `.zon` files and `--input zon`.
+  It named zon before but refused to read it, since the prebuilt fig it
+  linked carried only json, yaml, toml and fig.
+
+- `--input figl` names figl, as fig 6 does; `--input
+  fig` still reads as figl, and a `.fig` file still does.
+
+- a markdown file's block is found by twig, which
+  reads `---` (or `---<lang>`) and `+++` frontmatter and YAML endmatter.
+  A `;;;` JSON block or a fenced ```` ```yaml ```` block at the top of a
+  file is no longer read as the document; `check` treats such a file as
+  having no block.
+
+
 ## v0.4.0 — 2026-09-28
 
 ### Breaking

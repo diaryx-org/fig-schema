@@ -48,7 +48,7 @@ checksum = "a0005cbc0579d07474d9a452c76f23cbf55ba6c82dd84c7e7ed5c38ace903a7a"
 
 [[package]]
 name = "fig-schema"
-version = "0.4.0"
+version = "0.5.0"
 dependencies = [
  "fig",
  "fig-figl",
