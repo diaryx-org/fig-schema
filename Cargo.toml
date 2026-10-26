@@ -64,8 +64,8 @@ fig-zon = { version = "7", default-features = false, features = ["fig"], optiona
 fig-figl = { version = "7", default-features = false, features = ["fig"], optional = true }
 # A markdown file's frontmatter or endmatter, located by twig (fig 6 took
 # embedding out of fig).
-twig-doc = { version = "6", optional = true }
-twig-markdown = { version = "6", optional = true }
+twig-doc = { version = "7", optional = true }
+twig-markdown = { version = "7", optional = true }
 
 [dev-dependencies]
 # The tests and doc examples parse YAML, TOML and figl.
