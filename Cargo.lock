@@ -92,9 +92,9 @@ dependencies = [
 
 [[package]]
 name = "twig-doc"
-version = "6.0.0"
+version = "7.0.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "0cd6cc20c4f31dd31e5e56dfa7d01f3dbdf5692695b1007e8c54640f9766193f"
+checksum = "43059a77c9c1b7e56f38a74917a4e446da813388ab9a6227520081abf4fb5ebc"
 dependencies = [
  "fig",
  "fig-figl",
@@ -106,24 +106,24 @@ dependencies = [
 
 [[package]]
 name = "twig-html"
-version = "6.0.0"
+version = "7.0.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "1beb6c0999dc04d89a5a0da40e585cb05a9a7c13ecb19c2e5a65085a147f62ca"
+checksum = "7d0f5733e9d1cf54d306105e89d9a4388a36e1a77110065214dacc681adfcacc"
 dependencies = [
  "twig-kit",
 ]
 
 [[package]]
 name = "twig-kit"
-version = "6.0.0"
+version = "7.0.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "1bc21949975c1e3c5ab858d0d104e9d4f4d6000e1dcfa9e46bb7dcc460bba24f"
+checksum = "547e69372eacfac62d3bc3c0433683894d9b0743aa413311c50a0732ae890397"
 
 [[package]]
 name = "twig-markdown"
-version = "6.0.0"
+version = "7.0.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "60ffcae233483874bec0f3c39f8a2480a087d71beb038049a9ee287e0e570745"
+checksum = "a3e82b47b5b941022c8ce086f8c32c36e563482c1a2a74805abd2398eadbacd1"
 dependencies = [
  "twig-doc",
  "twig-html",
