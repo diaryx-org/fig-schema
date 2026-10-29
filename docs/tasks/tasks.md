@@ -2,11 +2,12 @@
 title: `fig-schema` tasks
 author: adammharris
 created: 2026-09-02
-updated: 2026-09-02
+updated: 2026-10-29
 part_of: '[fig-schema](/README.md)'
 contents:
 - '[A schema document format](/docs/tasks/schema-document-format.md)'
 - '[A schema-aware command line](/docs/tasks/schema-aware-cli.md)'
+- '[The command-line tests run without the command line](/docs/tasks/cli-tests-run-without-the-cli.md)'
 ---
 
 # Tasks
