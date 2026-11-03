@@ -2,12 +2,20 @@
 title: The command-line tests run without the command line
 author: adammharris
 created: 2026-10-29
-updated: 2026-10-29
-status: open
+updated: 2026-11-02
+status: done
 part_of: '[tasks](/docs/tasks/tasks.md)'
 ---
 
 # The command-line tests run without the command line
+
+## Status
+
+**Done.** `Cargo.toml` declares `tests/cli.rs` as a `[[test]]` named `cli`
+with `required-features = ["cli"]`, as the binary is. `cargo test
+--no-default-features` skips it and passes, and `cargo test` still runs all
+33. A CI job that runs the library without its default features is still
+the separate decision below.
 
 ## Repro
 

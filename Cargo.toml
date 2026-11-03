@@ -40,6 +40,14 @@ name = "fig-schema"
 path = "src/main.rs"
 required-features = ["cli"]
 
+# The command line's tests run the binary, so they need what it needs. Without
+# this, `cargo test --no-default-features` (the configuration every consumer
+# builds) still compiles them, and each fails on a binary cargo did not build.
+[[test]]
+name = "cli"
+path = "tests/cli.rs"
+required-features = ["cli"]
+
 [features]
 default = ["cli"]
 cli = [
