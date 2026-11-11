@@ -2,12 +2,22 @@
 title: A wrong entry hides its mapping's mismatch
 author: adammharris
 created: 2026-11-08
-updated: 2026-11-08
-status: open
+updated: 2026-11-11
+status: done
 part_of: '[tasks](/docs/tasks/tasks.md)'
 ---
 
 # A wrong entry hides its mapping's mismatch
+
+## Status
+
+**Done.** `judge` in `src/check.rs` drops a container's type mismatch in
+favour of its descendants' only when the container is a list, the one shape a
+type admits by its items. A mapping that does not fit reports its own
+mismatch whatever its entries say. Both repros below now report the mapping
+alongside its entry, as `explain` does, and
+`a_mappings_type_mismatch_is_reported_whatever_its_entries_say` pins them,
+with a list under the same rule still reported once, at its item.
 
 `Schema::check` drops a container's type mismatch when any node beneath it
 has already reported one. The rule was written for lists, and it also

@@ -220,10 +220,12 @@ impl<C: Validate> Schema<C> {
 /// container-level echo of an item-wise check and is dropped.
 ///
 /// For a constraint that is an *equal issue*: [`validate_enum`](crate::validate_enum)
-/// carries an item's issue up to the list. For a type it is *any* mismatch
-/// below: a type admits a list whose every item fits, so a list that does not
-/// fit is one with an item that does not, and that item has already said so
-/// at its own path.
+/// carries an item's issue up to the list. For a list's type it is *any*
+/// mismatch below: a type admits a list whose every item fits, so a list that
+/// does not fit is one with an item that does not, and that item has already
+/// said so at its own path. A mapping has no such rule — no type admits one by
+/// its entries — so a mapping that does not fit is wrong for its own reason,
+/// and says so whatever its entries said.
 fn judge<C: Validate>(
     rule: &FieldRule<C>,
     node: &Value,
@@ -231,9 +233,10 @@ fn judge<C: Validate>(
 ) -> Vec<VerdictKind> {
     let mut kinds = Vec::new();
     if let Some(expected) = rule.ty {
-        let item_already_said = descendants
-            .iter()
-            .any(|v| matches!(v.kind, VerdictKind::TypeMismatch { .. }));
+        let item_already_said = matches!(node, Value::Seq(_))
+            && descendants
+                .iter()
+                .any(|v| matches!(v.kind, VerdictKind::TypeMismatch { .. }));
         if !expected.admits(node) && !item_already_said {
             kinds.push(VerdictKind::TypeMismatch {
                 expected,
@@ -437,6 +440,48 @@ mod tests {
         assert_eq!(
             report(&schema, "tags: [x]\n"),
             ["tags: expected map, found seq"]
+        );
+    }
+
+    #[test]
+    fn a_mappings_type_mismatch_is_reported_whatever_its_entries_say() {
+        // No type admits a mapping by its entries, so a mapping under `str`
+        // is wrong for its own reason, and a wrong entry does not say it.
+        let schema = Schema::new(vec![
+            FieldRule::new(PathPat::parse("meta.**").unwrap())
+                .ty(FieldType::Str)
+                .constraint_opt(None),
+        ]);
+        assert_eq!(
+            report(&schema, "meta:\n  author: Ann\n"),
+            ["meta: expected str, found map"]
+        );
+        assert_eq!(
+            report(&schema, "meta:\n  author: 3\n"),
+            [
+                "meta.author: expected str, found int",
+                "meta: expected str, found map",
+            ]
+        );
+        // The root is a mapping like any other.
+        let schema = Schema::new(vec![
+            FieldRule::new(PathPat(vec![crate::SegPat::AnyDepth])).ty(FieldType::Str),
+        ]);
+        assert_eq!(
+            report(&schema, "flag: true\nn: 3\n"),
+            [
+                "flag: expected str, found bool",
+                "n: expected str, found int",
+                ": expected str, found map",
+            ]
+        );
+        // A list under it is still reported once, at its items.
+        assert_eq!(
+            report(&schema, "tags: [a, 3]\n"),
+            [
+                "tags[1]: expected str, found int",
+                ": expected str, found map"
+            ]
         );
     }
 
